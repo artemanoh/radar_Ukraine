@@ -220,6 +220,16 @@ function getThreatColor(type) {
   }
 }
 
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function normalizeName(str) {
   if (!str) return '';
   return String(str)
@@ -333,11 +343,154 @@ const State = {
   selectedRegion:'all'
 };
 
+const NOTIFICATIONS_STORAGE_KEY = 'radar_notifications_history_v3';
+
+/* ============================================================
+   ПОДІЄВА МОДЕЛЬ СПОВІЩЕНЬ ТА ТЕРМІНОВІ СПОВІЩЕННЯ (REALTIME DISPATCHER)
+============================================================ */
+const NOTIFICATION_CATEGORIES = {
+  OFFICIAL_ALERT: 'OFFICIAL_ALERT',
+  THREAT:         'THREAT',
+  LAUNCH:         'LAUNCH',
+  INFORMATION:    'INFORMATION',
+  AI_ANALYSIS:    'AI_ANALYSIS'
+};
+
+const NOTIFICATION_PRIORITIES = {
+  NORMAL: 'NORMAL',
+  URGENT: 'URGENT'
+};
+
 const previousAlertSnapshot  = new Map(); // uniqueKey -> { level, status, since, name }
 const previousThreatSnapshot = new Map(); // id -> { type, status }
 const seenMessageKeys        = new Set();
 
 let isInitialLoad = true;
+
+const NotificationDispatcher = {
+  processedEventIds: new Set(),
+  maxProcessedEvents: 1000,
+
+  init() {
+    try {
+      const saved = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item.id) this.processedEventIds.add(item.id);
+            if (item.sourceId) this.processedEventIds.add(item.sourceId);
+          }
+        }
+      }
+    } catch (e) {}
+  },
+
+  markSeen(id) {
+    if (!id) return;
+    this.processedEventIds.add(id);
+    if (this.processedEventIds.size > this.maxProcessedEvents) {
+      const first = this.processedEventIds.values().next().value;
+      this.processedEventIds.delete(first);
+    }
+  },
+
+  isSeen(id) {
+    return this.processedEventIds.has(id);
+  },
+
+  dispatch({
+    id,
+    type,
+    priority = NOTIFICATION_PRIORITIES.NORMAL,
+    title,
+    body,
+    place = '',
+    eventTime = null,
+    source = 'NEPTUN API',
+    level = 'red',
+    subtype = '',
+    isClear = false,
+    raw = null
+  }) {
+    if (!id) return false;
+
+    // 1. Інваріант: Initial snapshot / reload НЕ створюють сповіщень
+    if (isInitialLoad) {
+      this.markSeen(id);
+      return false;
+    }
+
+    // 2. Інваріант: Дедуплікація (0 duplicate notifications)
+    if (this.isSeen(id)) {
+      return false;
+    }
+    this.markSeen(id);
+
+    const s = StorageManager.getSettings();
+
+    // 3. Перевірка категорій у налаштуваннях
+    if (type === NOTIFICATION_CATEGORIES.OFFICIAL_ALERT && !s.officialAlertsEnabled) return false;
+    if (type === NOTIFICATION_CATEGORIES.THREAT && !s.threatsAlertsEnabled) return false;
+    if (type === NOTIFICATION_CATEGORIES.LAUNCH && !s.launchesAlertsEnabled) return false;
+    if (type === NOTIFICATION_CATEGORIES.INFORMATION && !s.infoMessagesEnabled) return false;
+    if (type === NOTIFICATION_CATEGORIES.AI_ANALYSIS && (!s.aiEnabled || !s.aiNotifications)) return false;
+
+    // 4. Перевірка відстежуваного регіону (якщо увімкнено список обраних територій)
+    const isFollowed = !place || FollowManager.matchesFollowed(place);
+    if (FollowManager.followedSet.size > 0 && !isFollowed) {
+      return false;
+    }
+
+    // 5. Визначення та повага до пріоритету URGENT
+    let effectivePriority = priority;
+    if (s.urgentAlertsEnabled === false && effectivePriority === NOTIFICATION_PRIORITIES.URGENT) {
+      effectivePriority = NOTIFICATION_PRIORITIES.NORMAL;
+    }
+    const isUrgent = effectivePriority === NOTIFICATION_PRIORITIES.URGENT;
+
+    // 6. Звуковий супровід (без дублювання: грає 1 раз тільки відповідний звук)
+    if (s.soundEnabled && !SoundService.isQuietTime()) {
+      if (isUrgent) {
+        SoundService.playUrgentSiren();
+      } else if (type === NOTIFICATION_CATEGORIES.OFFICIAL_ALERT) {
+        SoundService.playAlertSiren();
+      } else {
+        SoundService.playInfoChime();
+      }
+    }
+
+    // 7. Браузерні сповіщення (Push API)
+    if (s.notificationsEnabled) {
+      const pushTitle = isUrgent ? `🚨 ТЕРМІНОВО: ${title}` : title;
+      NotificationManager.send(pushTitle, body, id, isUrgent);
+    }
+
+    // 8. Інтерфейсний Toast
+    const toastTitle = isUrgent ? `🚨 ТЕРМІНОВО: ${title}` : title;
+    showToast(toastTitle, isUrgent);
+
+    // 9. Додавання картки у стрічку сповіщень (ОДНЕ сповіщення, без дублювання)
+    TelegramFeedService.addDispatchedNotification({
+      id,
+      type,
+      priority: effectivePriority,
+      title,
+      message: body,
+      territory: place,
+      eventTime,
+      receivedAt: new Date().toISOString(),
+      source,
+      sourceId: id,
+      level,
+      subtype,
+      status: isClear ? 'ВІДБІЙ' : (isUrgent ? 'ТЕРМІНОВО' : 'АКТИВНА'),
+      raw
+    });
+
+    return true;
+  }
+};
 
 /* ============================================================
    4. ПАРСЕР NEPTUN API
@@ -605,23 +758,30 @@ const ChangeDetector = {
   },
 
   handleAlertEvents(added, changed, removed) {
-    const s = StorageManager.getSettings();
     const timeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
 
     // 1. Відбої тривог
     for (const item of removed) {
-      if (!isInitialLoad) {
-        const place = item.name;
-        const isFollowed = FollowManager.matchesFollowed(place) || (item.oblast && FollowManager.matchesFollowed(item.oblast));
+      const place = item.name;
+      const eventId = `alert_clear_${item.key || place}_${item.since || Date.now()}`;
+      const exactTime = item.since ? new Date(item.since).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : timeStr;
 
-        if (isFollowed && s.officialAlertsEnabled) {
-          SoundService.playAlertSiren();
-          NotificationManager.send(`✅ ВІДБІЙ ТРИВОГИ: ${place}`, 'Повітряний простір спокійний');
-          showToast(`✅ Відбій тривоги: ${place}`);
-        }
+      if (!isInitialLoad) {
+        NotificationDispatcher.dispatch({
+          id: eventId,
+          type: NOTIFICATION_CATEGORIES.OFFICIAL_ALERT,
+          priority: NOTIFICATION_PRIORITIES.NORMAL,
+          title: `✅ Відбій тривоги: ${place}`,
+          body: 'Повітряний простір спокійний',
+          place,
+          eventTime: item.since || null,
+          source: 'NEPTUN API',
+          level: 'green',
+          isClear: true
+        });
 
         FeedService.addEvent({
-          time:   timeStr,
+          time:   exactTime,
           type:   'clear',
           title:  place,
           status: 'ВІДБІЙ',
@@ -637,15 +797,15 @@ const ChangeDetector = {
       const lvl = (item.level || 'red').toLowerCase();
       const lvlUpper = lvl.toUpperCase();
       const isYellow = lvl === 'yellow';
+      const isUrgent = lvl === 'red';
       const icon = isYellow ? '🟡' : '🔴';
       const levelTitle = isYellow ? 'зафіксовано офіційний жовтий рівень' : 'оголошено повітряну тривогу';
-
-      const isFollowed = FollowManager.matchesFollowed(place) || (item.oblast && FollowManager.matchesFollowed(item.oblast));
-
+      const eventId = `alert_active_${item.key || place}_${item.since || 'init'}`;
       const exactStartTime = item.since ? new Date(item.since).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : timeStr;
 
       if (isInitialLoad) {
         // Початкове завантаження: тихо додаємо в історію, без звуку та спаму
+        NotificationDispatcher.markSeen(eventId);
         FeedService.addEvent({
           time:   exactStartTime,
           type:   'alert',
@@ -656,11 +816,17 @@ const ChangeDetector = {
           isOfficial: true
         });
       } else {
-        if (isFollowed && s.officialAlertsEnabled) {
-          SoundService.playAlertSiren();
-          NotificationManager.send(`${icon} ${place}: ${levelTitle}`, item.reasons?.join(', ') || `Офіційний рівень [${lvlUpper}]`);
-          showToast(`${icon} ${place}: ${levelTitle} [${lvlUpper}]`);
-        }
+        NotificationDispatcher.dispatch({
+          id: eventId,
+          type: NOTIFICATION_CATEGORIES.OFFICIAL_ALERT,
+          priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
+          title: `${icon} ${place}: ${levelTitle}`,
+          body: item.reasons?.join(', ') || `Офіційний стан тривоги [${lvlUpper}]`,
+          place,
+          eventTime: item.since || null,
+          source: 'NEPTUN API',
+          level: item.level || 'red'
+        });
 
         FeedService.addEvent({
           time:   exactStartTime,
@@ -676,19 +842,27 @@ const ChangeDetector = {
 
     // 3. Зміна офіційного рівня небезпеки (yellow ↔ red)
     for (const { prev, unit } of changed) {
-      if (!isInitialLoad) {
-        const place = unit.name;
-        const newLvl = (unit.level || '').toUpperCase();
-        const isFollowed = FollowManager.matchesFollowed(place) || (unit.oblast && FollowManager.matchesFollowed(unit.oblast));
+      const place = unit.name;
+      const newLvl = (unit.level || '').toUpperCase();
+      const eventId = `alert_change_${unit.key || place}_${prev.level}_to_${unit.level}_${unit.since || Date.now()}`;
+      const isEscalation = (unit.level || '').toLowerCase() === 'red';
+      const exactTime = unit.since ? new Date(unit.since).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : timeStr;
 
-        if (isFollowed && s.officialAlertsEnabled) {
-          SoundService.playAlertSiren();
-          NotificationManager.send(`⚠️ Зміна рівня тривоги: ${place}`, `${prev.level.toUpperCase()} → ${newLvl}`);
-          showToast(`⚠️ ${place}: зміна рівня на ${newLvl}`);
-        }
+      if (!isInitialLoad) {
+        NotificationDispatcher.dispatch({
+          id: eventId,
+          type: NOTIFICATION_CATEGORIES.OFFICIAL_ALERT,
+          priority: isEscalation ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
+          title: `⚠️ Зміна рівня тривоги: ${place}`,
+          body: `Офіційний рівень змінено: ${prev.level.toUpperCase()} → ${newLvl}`,
+          place,
+          eventTime: unit.since || null,
+          source: 'NEPTUN API',
+          level: unit.level
+        });
 
         FeedService.addEvent({
-          time:   unit.since ? new Date(unit.since).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : timeStr,
+          time:   exactTime,
           type:   'alert',
           title:  place,
           level:  unit.level,
@@ -726,48 +900,72 @@ const ChangeDetector = {
 
     State.threats = parsedThreats;
 
-    for (const t of added) {
-      TelegramFeedService.addThreatNotification(t, false);
-    }
-    for (const t of removed) {
-      TelegramFeedService.addThreatNotification(t, true);
-    }
-
-    if (!isInitialLoad) {
-      const s = StorageManager.getSettings();
-      const timeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-
+    if (isInitialLoad) {
       for (const t of added) {
-        const typeLabel = (t.title || t.type || 'Ціль').toUpperCase();
-        const place     = t.locality ? `${t.locality}, ${t.region}` : (t.district || t.region || 'Україна');
-        const isFollowed = FollowManager.matchesFollowed(t.region) || (t.district && FollowManager.matchesFollowed(t.district));
-
-        if (isFollowed && s.threatsAlertsEnabled) {
-          SoundService.playInfoChime();
-          NotificationManager.send(`🟠 ЗАГРОЗА (${typeLabel})`, place);
-          showToast(`🟠 Загроза: ${typeLabel} (${place})`);
-        }
-
-        FeedService.addEvent({
-          time:   t.time || timeStr,
-          type:   t.type || 'drone',
-          title:  place,
-          status: 'АКТИВНА',
-          desc:   t.explanation || `Виявлено ціль (${typeLabel})`,
-          isOfficial: false
+        NotificationDispatcher.markSeen(`threat_detect_${t.id}`);
+        TelegramFeedService.addDispatchedNotification({
+          id: `threat_detect_${t.id}`,
+          type: NOTIFICATION_CATEGORIES.THREAT,
+          priority: NOTIFICATION_PRIORITIES.NORMAL,
+          title: `Загроза: ${(t.title || t.type || 'Ціль').toUpperCase()}`,
+          message: t.explanation || `Виявлено повітряну ціль`,
+          territory: t.locality ? `${t.locality}, ${t.region}` : (t.district || t.region || 'Україна'),
+          eventTime: t.time || t.updatedAt || t.timestamp || null,
+          source: 'NEPTUN API',
+          sourceId: t.id,
+          subtype: t.type || 'drone',
+          status: 'АКТИВНА'
         });
       }
+      return;
+    }
 
-      for (const t of removed) {
-        FeedService.addEvent({
-          time:   timeStr,
-          type:   'clear',
-          title:  'Ціль зникла',
-          status: 'ЛІКВІДОВАНО',
-          desc:   `Ціль (${(t.type || '').toUpperCase()}) більше не спостерігається`,
-          isOfficial: false
-        });
-      }
+    // Для нових цілей (підтверджені нові ID)
+    const timeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+    for (const t of added) {
+      const typeLabel = (t.title || t.type || 'Ціль').toUpperCase();
+      const place     = t.locality ? `${t.locality}, ${t.region}` : (t.district || t.region || 'Україна');
+      const isBallistic = (t.type || '').toLowerCase() === 'ballistic';
+      const isMissile   = (t.type || '').toLowerCase() === 'missile';
+      const isLaunch    = isBallistic || isMissile;
+      const isUrgent    = isBallistic || isMissile || FollowManager.matchesFollowed(t.region) || (t.district && FollowManager.matchesFollowed(t.district));
+      const eventId     = `threat_detect_${t.id}`;
+      const category    = isLaunch ? NOTIFICATION_CATEGORIES.LAUNCH : NOTIFICATION_CATEGORIES.THREAT;
+
+      NotificationDispatcher.dispatch({
+        id: eventId,
+        type: category,
+        priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
+        title: isLaunch ? `🚀 ЗАПУСК / ЗАГРОЗА (${typeLabel})` : `🟠 ЗАГРОЗА (${typeLabel})`,
+        body: t.explanation || `Виявлено ціль (${typeLabel}) у районі ${place}`,
+        place,
+        eventTime: t.time || t.updatedAt || t.timestamp || null,
+        source: 'NEPTUN API',
+        subtype: t.type || 'drone',
+        raw: t
+      });
+
+      FeedService.addEvent({
+        time:   t.time || timeStr,
+        type:   t.type || 'drone',
+        title:  place,
+        status: 'АКТИВНА',
+        desc:   t.explanation || `Виявлено ціль (${typeLabel})`,
+        isOfficial: false
+      });
+    }
+
+    // Оновлюємо статус ліквідованих цілей
+    for (const t of removed) {
+      TelegramFeedService.markThreatLiquidated(t.id);
+      FeedService.addEvent({
+        time:   timeStr,
+        type:   'clear',
+        title:  'Ціль зникла',
+        status: 'ЛІКВІДОВАНО',
+        desc:   `Ціль (${(t.type || '').toUpperCase()}) більше не спостерігається`,
+        isOfficial: false
+      });
     }
   }
 };
@@ -1029,7 +1227,6 @@ const PollingService = {
 /* ============================================================
    8. MESSAGES SERVICE & NOTIFICATIONS HUB (ВКЛАДКА СПОВІЩЕННЯ + LLM)
 ============================================================ */
-const NOTIFICATIONS_STORAGE_KEY = 'radar_notifications_history_v3';
 
 function formatEventTime(val, includeSeconds = false) {
   if (!val) return '--:--';
@@ -1085,40 +1282,31 @@ const TelegramFeedService = {
     } catch (e) {}
   },
 
-  addAlertNotification(item, isRemoved = false) {
-    if (!item) return;
-    const name = item.name || item.oblast || 'Україна';
-    const lvl = (item.level || 'red').toLowerCase();
-    const lvlUpper = lvl.toUpperCase();
+  addDispatchedNotification(notifData) {
+    if (!notifData || !notifData.id) return;
+    const existingIdx = this.notifications.findIndex(n => n.id === notifData.id || (n.sourceId && n.sourceId === notifData.id));
 
-    // Унікальний стабільний ідентифікатор події
-    const id = isRemoved
-      ? `alert_clear_${item.key || name}_${item.since || Date.now()}`
-      : `alert_active_${item.key || name}_${item.since || 'init'}`;
-
-    const existingIdx = this.notifications.findIndex(n => n.id === id);
-
-    const notif = {
-      id,
-      type:       'alert',
-      territory:  name,
-      title:      name,
-      message:    isRemoved
-        ? `Відбій повітряної тривоги в ${name}`
-        : (item.reasons && item.reasons.length ? item.reasons.join(', ') : `Офіційний рівень [${lvlUpper}]`),
-      // Точний API timestamp початку тривоги (Section 53: NEVER Date.now() якщо є since)
-      eventTime:  isRemoved ? (item.since || null) : (item.since || item.started_at || null),
-      receivedAt: new Date().toISOString(),
-      source:     'neptun_alerts',
-      sourceId:   item.key || name,
-      level:      item.level || 'red',
-      status:     isRemoved ? 'ВІДБІЙ' : lvlUpper
+    const card = {
+      id:         notifData.id,
+      type:       notifData.type,
+      priority:   notifData.priority || 'NORMAL',
+      territory:  notifData.territory || '',
+      title:      notifData.title || '',
+      message:    notifData.message || '',
+      eventTime:  notifData.eventTime || null,
+      receivedAt: notifData.receivedAt || new Date().toISOString(),
+      source:     notifData.source || 'NEPTUN API',
+      sourceId:   notifData.sourceId || notifData.id,
+      level:      notifData.level || 'red',
+      subtype:    notifData.subtype || '',
+      status:     notifData.status || 'АКТИВНА',
+      raw:        notifData.raw || null
     };
 
     if (existingIdx >= 0) {
-      this.notifications[existingIdx] = notif;
+      this.notifications[existingIdx] = { ...this.notifications[existingIdx], ...card };
     } else {
-      this.notifications.unshift(notif);
+      this.notifications.unshift(card);
       if (this.notifications.length > 250) this.notifications.pop();
     }
 
@@ -1129,46 +1317,70 @@ const TelegramFeedService = {
     }
   },
 
+  markThreatLiquidated(threatId) {
+    if (!threatId) return;
+    const notif = this.notifications.find(n => n.id === `threat_detect_${threatId}` || n.sourceId === threatId);
+    if (notif) {
+      notif.status = 'ЛІКВІДОВАНО';
+      notif.receivedAt = new Date().toISOString();
+      this.saveNotifications();
+      this.updateCounters();
+      if (NavigationController.currentTab === 'telegram') {
+        this.render();
+      }
+    }
+  },
+
+  addAlertNotification(item, isRemoved = false) {
+    if (!item) return;
+    const name = item.name || item.oblast || 'Україна';
+    const lvl = (item.level || 'red').toLowerCase();
+    const lvlUpper = lvl.toUpperCase();
+    const id = isRemoved
+      ? `alert_clear_${item.key || name}_${item.since || Date.now()}`
+      : `alert_active_${item.key || name}_${item.since || 'init'}`;
+
+    this.addDispatchedNotification({
+      id,
+      type:       'OFFICIAL_ALERT',
+      priority:   lvl === 'red' ? 'URGENT' : 'NORMAL',
+      territory:  name,
+      title:      name,
+      message:    isRemoved
+        ? `Відбій повітряної тривоги в ${name}`
+        : (item.reasons && item.reasons.length ? item.reasons.join(', ') : `Офіційний рівень [${lvlUpper}]`),
+      eventTime:  isRemoved ? (item.since || null) : (item.since || item.started_at || null),
+      source:     'neptun_alerts',
+      sourceId:   item.key || name,
+      level:      item.level || 'red',
+      status:     isRemoved ? 'ВІДБІЙ' : lvlUpper
+    });
+  },
+
   addThreatNotification(threat, isRemoved = false) {
     if (!threat) return;
     const place = threat.locality ? `${threat.locality}, ${threat.region}` : (threat.district || threat.region || 'Україна');
     const typeLabel = (threat.title || threat.type || 'Ціль').toUpperCase();
+    const isBallistic = (threat.type || '').toLowerCase() === 'ballistic';
+    const isMissile   = (threat.type || '').toLowerCase() === 'missile';
+    const isLaunch    = isBallistic || isMissile;
+    const id = isRemoved ? `threat_clear_${threat.id}_${Date.now()}` : `threat_detect_${threat.id}`;
 
-    const id = isRemoved
-      ? `threat_clear_${threat.id}_${Date.now()}`
-      : `threat_active_${threat.id}_${threat.time || threat.updatedAt || ''}`;
-
-    const existingIdx = this.notifications.findIndex(n => n.id === id);
-
-    const notif = {
+    this.addDispatchedNotification({
       id,
-      type:       'threat',
+      type:       isLaunch ? 'LAUNCH' : 'THREAT',
+      priority:   isBallistic || isMissile ? 'URGENT' : 'NORMAL',
       territory:  place,
       title:      `Загроза: ${typeLabel}`,
       message:    isRemoved
         ? `Ціль (${typeLabel}) більше не спостерігається`
         : (threat.explanation || `Виявлено повітряну ціль (${typeLabel})`),
-      // Точний timestamp загрози з API
       eventTime:  threat.time || threat.updatedAt || threat.timestamp || null,
-      receivedAt: new Date().toISOString(),
       source:     'neptun_threats',
       sourceId:   threat.id,
       subtype:    threat.type || 'drone',
       status:     isRemoved ? 'ЛІКВІДОВАНО' : 'АКТИВНА'
-    };
-
-    if (existingIdx >= 0) {
-      this.notifications[existingIdx] = notif;
-    } else {
-      this.notifications.unshift(notif);
-      if (this.notifications.length > 250) this.notifications.pop();
-    }
-
-    this.saveNotifications();
-    this.updateCounters();
-    if (NavigationController.currentTab === 'telegram') {
-      this.render();
-    }
+    });
   },
 
   bindEvents() {
@@ -1353,8 +1565,19 @@ const TelegramFeedService = {
 
       if (analysis.relevant && s.aiEnabled && s.aiNotifications && !isInitialLoad) {
         if (analysis.category === 'active_threat' || analysis.category === 'possible_threat') {
-          SoundService.playInfoChime();
-          NotificationManager.send(`🧠 ШІ [${(analysis.territories || []).join(', ') || 'Загроза'}]`, analysis.summary);
+          const isUrgent = analysis.category === 'active_threat';
+          const primaryTerritory = (analysis.territories || [])[0] || '';
+          NotificationDispatcher.dispatch({
+            id: `ai_analysis_${key}`,
+            type: NOTIFICATION_CATEGORIES.AI_ANALYSIS,
+            priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
+            title: `🧠 ШІ: ${(analysis.territories || []).join(', ') || 'Аналіз загрози'}`,
+            body: analysis.summary || '',
+            place: primaryTerritory,
+            eventTime: msg.date || null,
+            source: 'ШІ RADAR',
+            raw: analysis
+          });
         }
       }
 
@@ -1536,7 +1759,11 @@ const TelegramFeedService = {
   },
 
   renderNotificationCard(n) {
-    if (n.type === 'alert') {
+    const isUrgent = n.priority === 'URGENT';
+    const urgentCardClass = isUrgent ? 'urgent-notification-card' : '';
+    const urgentBadgeHtml = isUrgent ? '<span class="urgent-badge-pill">🚨 ТЕРМІНОВЕ СПОВІЩЕННЯ</span>' : '';
+
+    if (n.type === 'OFFICIAL_ALERT' || n.type === 'alert') {
       const isClear = n.status === 'ВІДБІЙ';
       const c = isClear ? '#22c55e' : getAlertColor(n.level);
       const timeDisplay = isClear
@@ -1544,56 +1771,65 @@ const TelegramFeedService = {
         : (n.eventTime ? `Початок: ${formatEventTime(n.eventTime)}` : `Початок: --:--`);
 
       return `
-        <article class="tg-message-card border-red-500/30 hover:border-red-500/60 transition-colors cursor-pointer group" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${n.territory}'); MapService.selectAndShowDistrict('${n.territory}', true);">
+        <article class="tg-message-card border-red-500/30 hover:border-red-500/60 transition-colors cursor-pointer group ${urgentCardClass}" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${escapeHtml(n.territory)}'); MapService.selectAndShowDistrict('${escapeHtml(n.territory)}', true);">
           <div class="flex items-center justify-between pb-1.5 border-b border-white/10 mb-2">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
+              ${urgentBadgeHtml}
               <span class="px-2 py-0.5 rounded text-[10px] font-bold text-white shadow-sm" style="background-color: ${c}">
                 ${isClear ? '🟢 ВІДБІЙ ТРИВОГИ' : `🔴 ОФІЦІЙНА ТРИВОГА [${(n.level || 'RED').toUpperCase()}]`}
               </span>
-              <span class="text-[10px] font-mono text-gray-400">NEPTUN API</span>
+              <span class="text-[10px] font-mono text-gray-400">${escapeHtml(n.source || 'NEPTUN API')}</span>
             </div>
             <div class="flex items-center gap-2 font-mono text-[10px]">
               <span class="text-amber-300 font-bold">${timeDisplay}</span>
             </div>
           </div>
           <div class="flex items-center justify-between">
-            <h4 class="text-sm font-bold text-white group-hover:text-sky-300 transition-colors">📍 ${n.title}</h4>
+            <h4 class="text-sm font-bold text-white group-hover:text-sky-300 transition-colors">📍 ${escapeHtml(n.title)}</h4>
             <span class="text-[10px] text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">Показати на карті →</span>
           </div>
-          <p class="text-xs text-gray-300 mt-1 leading-relaxed">${n.message}</p>
+          <p class="text-xs text-gray-300 mt-1 leading-relaxed">${escapeHtml(n.message)}</p>
         </article>
       `;
     }
 
-    if (n.type === 'threat') {
+    if (n.type === 'LAUNCH' || n.type === 'THREAT' || n.type === 'threat') {
       const isClear = n.status === 'ЛІКВІДОВАНО';
+      const isLaunch = n.type === 'LAUNCH';
       const timeDisplay = n.eventTime ? `Час фіксації: ${formatEventTime(n.eventTime, true)}` : `Час: ${formatEventTime(n.receivedAt, true)}`;
+      const typeBadge = isClear 
+        ? '✅ ЦІЛЬ ЗНИКЛА' 
+        : (isLaunch ? `🚀 ЗАПУСК [${(n.subtype || 'РАКЕТА').toUpperCase()}]` : `🟠 ЗАГРОЗА [${(n.subtype || 'ЦІЛЬ').toUpperCase()}]`);
+      const typeBadgeClass = isClear 
+        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' 
+        : (isLaunch ? 'bg-red-500/25 text-red-200 border border-red-500/50' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40');
 
       return `
-        <article class="tg-message-card border-amber-500/30 hover:border-amber-500/60 transition-colors cursor-pointer group" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${n.territory}');">
+        <article class="tg-message-card border-amber-500/30 hover:border-amber-500/60 transition-colors cursor-pointer group ${urgentCardClass}" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${escapeHtml(n.territory)}');">
           <div class="flex items-center justify-between pb-1.5 border-b border-white/10 mb-2">
-            <div class="flex items-center gap-2">
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isClear ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">
-                ${isClear ? '✅ ЦІЛЬ ЗНИКЛА' : `🟠 ЗАГРОЗА [${(n.subtype || 'ЦІЛЬ').toUpperCase()}]`}
+            <div class="flex items-center gap-2 flex-wrap">
+              ${urgentBadgeHtml}
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${typeBadgeClass}">
+                ${typeBadge}
               </span>
-              <span class="text-[10px] font-mono text-gray-400">NEPTUN API</span>
+              <span class="text-[10px] font-mono text-gray-400">${escapeHtml(n.source || 'NEPTUN API')}</span>
             </div>
             <span class="font-mono text-[10px] text-amber-300 font-bold">${timeDisplay}</span>
           </div>
           <div class="flex items-center justify-between">
-            <h4 class="text-sm font-bold text-amber-200 group-hover:text-amber-100">⚠️ ${n.title} (${n.territory})</h4>
+            <h4 class="text-sm font-bold text-amber-200 group-hover:text-amber-100">⚠️ ${escapeHtml(n.title)} ${n.territory ? `(${escapeHtml(n.territory)})` : ''}</h4>
             <span class="text-[10px] text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">Показати на карті →</span>
           </div>
-          <p class="text-xs text-gray-300 mt-1 leading-relaxed">${n.message}</p>
+          <p class="text-xs text-gray-300 mt-1 leading-relaxed">${escapeHtml(n.message)}</p>
         </article>
       `;
     }
 
-    // Тип 'message' (Telegram / Інформаційне повідомлення)
+    // Тип 'INFORMATION' або 'message'
     const key = n.sourceId || n.id;
     const analysis = n.analysis || this.analyzedCache.get(key) || (n.rawMsg ? n.rawMsg._analysis : null);
     const msgTimeDisplay = n.eventTime ? `Повідомлення: ${formatEventTime(n.eventTime, true)}` : `Час: ${formatEventTime(n.receivedAt, true)}`;
-    const channelName = n.title || 'Telegram';
+    const channelName = n.title || n.source || 'Telegram';
 
     let llmHtml = '';
     if (analysis) {
@@ -1610,10 +1846,10 @@ const TelegramFeedService = {
       }
 
       const territoriesBadges = (analysis.territories || []).map(t =>
-        `<span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-400/25">📍 ${t}</span>`
+        `<span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-400/25">📍 ${escapeHtml(t)}</span>`
       ).join(' ');
 
-      const timeText = analysis.timeMentioned ? `<span class="text-amber-300 font-mono text-[10px] ml-2">🕒 ${analysis.timeMentioned}</span>` : '';
+      const timeText = analysis.timeMentioned ? `<span class="text-amber-300 font-mono text-[10px] ml-2">🕒 ${escapeHtml(analysis.timeMentioned)}</span>` : '';
       const analysisTimeDisplay = analysis.analyzedAt ? `Аналіз LLM: ${formatEventTime(analysis.analyzedAt, true)}` : '';
 
       llmHtml = `
@@ -1630,7 +1866,7 @@ const TelegramFeedService = {
             </div>
           </div>
 
-          <p class="text-xs text-gray-100 font-medium leading-relaxed">${analysis.summary}</p>
+          <p class="text-xs text-gray-100 font-medium leading-relaxed">${escapeHtml(analysis.summary)}</p>
 
           ${territoriesBadges ? `<div class="flex flex-wrap gap-1 pt-0.5">${territoriesBadges}</div>` : ''}
 
@@ -1642,16 +1878,17 @@ const TelegramFeedService = {
     }
 
     return `
-      <article class="tg-message-card">
+      <article class="tg-message-card ${urgentCardClass}">
         <div class="flex items-center justify-between pb-2 border-b border-white/10 mb-2">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-bold text-sky-300 font-mono">${channelName}</span>
+          <div class="flex items-center gap-2 flex-wrap">
+            ${urgentBadgeHtml}
+            <span class="text-xs font-bold text-sky-300 font-mono">${escapeHtml(channelName)}</span>
             <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-blue-500/20 text-blue-300 border border-blue-400/30">🔵 ІНФО (НЕ ТРИВОГА)</span>
           </div>
           <span class="text-[10px] font-mono text-gray-400">${msgTimeDisplay}</span>
         </div>
 
-        <p class="text-xs text-gray-200 leading-relaxed whitespace-pre-line select-text">${n.message || ''}</p>
+        <p class="text-xs text-gray-200 leading-relaxed whitespace-pre-line select-text">${escapeHtml(n.message || '')}</p>
 
         ${llmHtml}
       </article>`;
@@ -1679,8 +1916,9 @@ const MessagesService = {
 
       if (this.isInitialMessagesLoad) {
         for (const m of messagesList) {
-          const key = m.id || `${m.date}::${m.channel}::${(m.text || '').slice(0, 30)}`;
+          const key = m.id || `${m.channel || 'Telegram'}::${m.date || ''}::${(m.text || '').trim()}`;
           seenMessageKeys.add(key);
+          NotificationDispatcher.markSeen(`msg_${key}`);
         }
         this.isInitialMessagesLoad = false;
         TelegramFeedService.handleIncomingMessages(messagesList);
@@ -1689,8 +1927,8 @@ const MessagesService = {
 
       const newMessages = [];
       for (const m of messagesList) {
-        const key = m.id || `${m.date}::${m.channel}::${(m.text || '').slice(0, 30)}`;
-        if (!seenMessageKeys.has(key)) {
+        const key = m.id || `${m.channel || 'Telegram'}::${m.date || ''}::${(m.text || '').trim()}`;
+        if (!seenMessageKeys.has(key) && !NotificationDispatcher.isSeen(`msg_${key}`)) {
           seenMessageKeys.add(key);
           newMessages.push(m);
         }
@@ -1709,7 +1947,7 @@ const MessagesService = {
   processNewMessage(msg) {
     const text = msg.text || '';
     const channel = msg.channel || 'Telegram';
-    const s = StorageManager.getSettings();
+    const textLower = text.toLowerCase();
 
     let matchedTerritory = null;
     for (const followed of FollowManager.followedSet) {
@@ -1719,11 +1957,23 @@ const MessagesService = {
       }
     }
 
-    if (matchedTerritory && s.infoMessagesEnabled) {
-      SoundService.playInfoChime();
-      NotificationManager.send(`🔵 ${channel}: ${matchedTerritory}`, text.slice(0, 120));
-      showToast(`🔵 ${channel} щодо ${matchedTerritory}: ${text.slice(0, 60)}...`);
-    }
+    const isLaunch = textLower.includes('пуск') || textLower.includes('запуск') || textLower.includes('балістик') || textLower.includes('кинджал') || textLower.includes('циркон') || textLower.includes('іскандер') || textLower.includes('калібр');
+    const isUrgent = isLaunch || textLower.includes('терміново') || textLower.includes('увага');
+    const category = isLaunch ? NOTIFICATION_CATEGORIES.LAUNCH : NOTIFICATION_CATEGORIES.INFORMATION;
+
+    const key = msg.id || `${channel}::${msg.date || ''}::${text.trim()}`;
+
+    NotificationDispatcher.dispatch({
+      id: `msg_${key}`,
+      type: category,
+      priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
+      title: isLaunch ? `🚀 ${channel}: Пуск / Загроза` : `🔵 ${channel}`,
+      body: text,
+      place: matchedTerritory || '',
+      eventTime: msg.date || null,
+      source: channel,
+      raw: msg
+    });
   },
 
   matchesTerritoryInText(text, territoryName) {
@@ -3464,11 +3714,13 @@ const UIController = {
     const btnSave          = document.getElementById('btn-save-settings');
     const notifCheck       = document.getElementById('setting-notifications-enabled');
     const officialCheck    = document.getElementById('setting-official-alerts-enabled');
+    const threatsCheck     = document.getElementById('setting-threats-alerts-enabled');
+    const launchesCheck    = document.getElementById('setting-launches-alerts-enabled');
     const infoCheck        = document.getElementById('setting-info-messages-enabled');
+    const urgentCheck      = document.getElementById('setting-urgent-alerts-enabled');
     const soundCheck       = document.getElementById('setting-sound-enabled');
     const quietCheck       = document.getElementById('setting-quiet-hours');
     const opRange          = document.getElementById('setting-zone-opacity');
-    const threatsCheck     = document.getElementById('setting-threats-alerts-enabled');
     const opLabel          = document.getElementById('label-zone-opacity');
     const layerAlerts      = document.getElementById('setting-layer-alerts');
     const layerThreats     = document.getElementById('setting-layer-threats');
@@ -3508,11 +3760,13 @@ const UIController = {
     const openModal = () => {
       const s = StorageManager.getSettings();
       if (notifCheck)      notifCheck.checked      = s.notificationsEnabled;
-      if (officialCheck)   officialCheck.checked   = s.officialAlertsEnabled;
+      if (officialCheck)   officialCheck.checked   = s.officialAlertsEnabled !== false;
       if (threatsCheck)    threatsCheck.checked    = s.threatsAlertsEnabled !== false;
+      if (launchesCheck)   launchesCheck.checked   = s.launchesAlertsEnabled !== false;
       if (infoCheck)       infoCheck.checked       = s.infoMessagesEnabled !== false;
-      if (soundCheck)      soundCheck.checked      = s.soundEnabled;
-      if (quietCheck)      quietCheck.checked      = s.quietHours;
+      if (urgentCheck)     urgentCheck.checked     = s.urgentAlertsEnabled !== false;
+      if (soundCheck)      soundCheck.checked      = s.soundEnabled !== false;
+      if (quietCheck)      quietCheck.checked      = s.quietHours || false;
       if (opRange)         opRange.value           = s.zoneOpacity || 0.35;
       if (opLabel)         opLabel.textContent     = `${Math.round((s.zoneOpacity || 0.35) * 100)}%`;
       if (layerAlerts)     layerAlerts.checked     = s.layerAlerts;
@@ -3555,13 +3809,14 @@ const UIController = {
       testSoundBtn.disabled = true;
       const originalText = testSoundBtn.textContent;
       testSoundBtn.textContent = 'Відтворення...';
-      SoundService.playAlertSiren();
-      setTimeout(() => SoundService.playInfoChime(), 1200);
-      showToast('🔊 Тестовий сигнал (Сирена + Chime)');
+      SoundService.playUrgentSiren();
+      setTimeout(() => SoundService.playAlertSiren(), 900);
+      setTimeout(() => SoundService.playInfoChime(), 1750);
+      showToast('🔊 Тест звуку: Терміновий + Сирена + Chime', true);
       setTimeout(() => {
         testSoundBtn.disabled = false;
         testSoundBtn.textContent = originalText;
-      }, 2000);
+      }, 2300);
     });
 
     btnSave?.addEventListener('click', () => {
@@ -3573,7 +3828,9 @@ const UIController = {
         notificationsEnabled:  notifCheck?.checked || false,
         officialAlertsEnabled: officialCheck?.checked !== false,
         threatsAlertsEnabled:  threatsCheck?.checked !== false,
+        launchesAlertsEnabled: launchesCheck?.checked !== false,
         infoMessagesEnabled:   infoCheck?.checked !== false,
+        urgentAlertsEnabled:   urgentCheck?.checked !== false,
         aiEnabled:             aiMasterCheck?.checked === true,
         aiAnalyzeMessages:     aiAnalyzeCheck?.checked !== false,
         aiNotifications:       aiNotifCheck?.checked === true,
@@ -3651,6 +3908,42 @@ const SoundService = {
     if (!s.quietHours) return false;
     const h = new Date().getHours();
     return h >= 23 || h < 7;
+  },
+
+  playUrgentSiren() {
+    if (isInitialLoad) return;
+    const s = StorageManager.getSettings();
+    if (!s.soundEnabled || s.urgentAlertsEnabled === false || this.isQuietTime()) return;
+
+    this.synthesizeUrgentAlert();
+  },
+
+  synthesizeUrgentAlert() {
+    try {
+      this.ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // Двотональний тактичний пульс високої уваги: 880Hz -> 587Hz -> 880Hz (тривалість 0.85с, без нескінченного зациклення)
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.setValueAtTime(587.33, now + 0.15);
+      osc.frequency.setValueAtTime(880, now + 0.3);
+      osc.frequency.setValueAtTime(587.33, now + 0.45);
+      osc.frequency.setValueAtTime(880, now + 0.6);
+
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.3, now + 0.05);
+      gain.gain.setValueAtTime(0.25, now + 0.6);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.85);
+    } catch (e) {}
   },
 
   playAlertSiren() {
@@ -3732,7 +4025,7 @@ const NotificationManager = {
     return (await Notification.requestPermission()) === 'granted';
   },
 
-  send(title, body, tag = 'radar-alert') {
+  send(title, body, tag = 'radar-alert', isUrgent = false) {
     if (isInitialLoad) return;
     const s = StorageManager.getSettings();
     if (!s.notificationsEnabled || SoundService.isQuietTime()) return;
@@ -3740,8 +4033,11 @@ const NotificationManager = {
     try {
       new Notification(title, {
         body,
-        icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚨</text></svg>',
-        tag
+        icon: isUrgent
+          ? 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚨</text></svg>'
+          : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>',
+        tag,
+        requireInteraction: isUrgent
       });
     } catch (e) {}
   }
@@ -3756,7 +4052,9 @@ const StorageManager = {
     notificationsEnabled:  false,
     officialAlertsEnabled: true,
     threatsAlertsEnabled:  true,
+    launchesAlertsEnabled: true,
     infoMessagesEnabled:   true,
+    urgentAlertsEnabled:   true,
     aiEnabled:             false, // Вимога п.6: ШІ за замовчуванням вимкнений!
     aiAnalyzeMessages:     false,
     aiNotifications:       false,
@@ -4230,20 +4528,21 @@ const SvgIconFactory = {
   }
 };
 
-function showToast(message) {
+function showToast(message, isUrgent = false) {
   const container = document.getElementById('toast-container');
   if (!container) return;
   const toast = document.createElement('div');
-  toast.className   = 'radar-toast font-mono';
+  toast.className   = isUrgent ? 'radar-toast urgent-toast font-mono' : 'radar-toast font-mono';
   toast.textContent = message;
   container.appendChild(toast);
-  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.4s ease'; setTimeout(() => toast.remove(), 400); }, 4000);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.4s ease'; setTimeout(() => toast.remove(), 400); }, isUrgent ? 5500 : 4000);
 }
 
 /* ============================================================
    СТАРТ СИСТЕМИ
 ============================================================ */
 document.addEventListener('DOMContentLoaded', async () => {
+  NotificationDispatcher.init();
   SoundService.init();
   FollowManager.init();
   NavigationController.init();

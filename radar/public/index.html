@@ -755,19 +755,14 @@
         
         <!-- Секція 1: Сповіщення -->
         <div class="space-y-2">
-          <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">СПОДІВАННЯ ТА ЗВУК</span>
-          
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
-            <div>
-              <p class="font-semibold text-gray-200">🔔 Системні сповіщення</p>
-              <p class="text-[11px] text-gray-400">Push-повідомлення в браузері для обраних територій</p>
-            </div>
-            <input id="setting-notifications-enabled" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
+          <div class="flex items-center justify-between pb-1 border-b border-white/10">
+            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">СПОДІВАННЯ ТА ЗВУК</span>
+            <span class="text-[10px] font-mono text-sky-400">Realtime-події</span>
+          </div>
 
           <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <div>
-              <p class="font-semibold text-gray-200">🔴 1. Офіційні тривоги</p>
+              <p class="font-semibold text-gray-200">🔴 Офіційні тривоги</p>
               <p class="text-[11px] text-gray-400">Сповіщати при зміні офіційного статусу NEPTUN alerts</p>
             </div>
             <input id="setting-official-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
@@ -775,24 +770,50 @@
 
           <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <div>
-              <p class="font-semibold text-gray-200">🟠 2. Активні загрози (цілі)</p>
-              <p class="text-[11px] text-gray-400">Сповіщати про появу нових цілей (БпЛА, ракети)</p>
+              <p class="font-semibold text-gray-200">🟠 Загрози (цілі)</p>
+              <p class="text-[11px] text-gray-400">Сповіщати про появу нових підтверджених цілей (БпЛА, ракети)</p>
             </div>
             <input id="setting-threats-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-amber-500 rounded cursor-pointer">
           </label>
 
           <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <div>
-              <p class="font-semibold text-gray-200">🔵 3. Інформаційні повідомлення Telegram</p>
-              <p class="text-[11px] text-gray-400">Моніторинг стрічки щодо відстежуваних регіонів</p>
+              <p class="font-semibold text-gray-200">🚀 Запуски ракет та балістики</p>
+              <p class="text-[11px] text-gray-400">Фіксація пусків стратегічної авіації, балістики та Калібрів</p>
+            </div>
+            <input id="setting-launches-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-red-600 rounded cursor-pointer">
+          </label>
+
+          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+            <div>
+              <p class="font-semibold text-gray-200">🔵 Інформація з оперативних каналів</p>
+              <p class="text-[11px] text-gray-400">Моніторинг оперативних зведень щодо обраних територій</p>
             </div>
             <input id="setting-info-messages-enabled" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
           </label>
 
           <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <div>
+              <p class="font-semibold text-gray-200">🧠 ШІ-аналіз загроз</p>
+              <p class="text-[11px] text-gray-400">Сповіщення про результати оперативного аналізу тексту</p>
+            </div>
+            <input id="setting-ai-notifications" type="checkbox" class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
+          </label>
+
+          <label class="flex items-center justify-between p-2.5 rounded-lg bg-red-950/20 border border-red-500/30 cursor-pointer hover:bg-red-950/30 transition-colors">
+            <div>
+              <p class="font-semibold text-red-200 flex items-center gap-1.5">
+                <span>🚨</span> <span>Термінові сповіщення</span>
+              </p>
+              <p class="text-[11px] text-gray-400">Підвищений звуковий та візуальний пріоритет для критичних подій</p>
+            </div>
+            <input id="setting-urgent-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
+          </label>
+
+          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+            <div>
               <p class="font-semibold text-gray-200">🔊 Звуковий супровід</p>
-              <p class="text-[11px] text-gray-400">Сирена тривоги + Chime загрози</p>
+              <p class="text-[11px] text-gray-400">Сирени тривог, тактичний пульс та звукові сигнали</p>
             </div>
             <div class="flex items-center space-x-2">
               <button id="btn-test-sound" type="button" class="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-300 font-mono">
@@ -804,8 +825,17 @@
 
           <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <div>
+              <p class="font-semibold text-gray-200">🔔 Браузерні сповіщення (Push API)</p>
+              <p class="text-[11px] text-gray-400">Спливаючі системні вікна ОС при надходженні подій</p>
+              <p class="text-[10px] text-gray-500 mt-0.5">ℹ️ GitHub Pages не має push-сервера. Сповіщення надійно діють, поки вкладка відкрита (у т.ч. у фоні).</p>
+            </div>
+            <input id="setting-notifications-enabled" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
+          </label>
+
+          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+            <div>
               <p class="font-semibold text-gray-200">🌙 Тихий режим (23:00 – 07:00)</p>
-              <p class="text-[11px] text-gray-400">Автоматично вимикати звук уночі</p>
+              <p class="text-[11px] text-gray-400">Автоматично вимикати звук у нічний час</p>
             </div>
             <input id="setting-quiet-hours" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
           </label>
