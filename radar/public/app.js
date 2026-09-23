@@ -391,6 +391,14 @@ const NeptunParser = {
         };
         result.oblasts.set(normName, oblastObj);
 
+        const strippedOblast = normName.replace(/\s+область$/, '').trim();
+        if (strippedOblast && strippedOblast !== normName) {
+          result.oblasts.set(strippedOblast, oblastObj);
+        }
+        if (item.key && typeof item.key === 'string') {
+          result.oblasts.set(normalizeName(item.key), oblastObj);
+        }
+
         if (normName.includes('крим')) {
           result.oblasts.set('автономна республіка крим', oblastObj);
           result.oblasts.set('крим', oblastObj);
@@ -416,7 +424,7 @@ const NeptunParser = {
       const reasons   = Array.isArray(item.reasons) ? item.reasons : (item.reason ? [item.reason] : []);
       const key       = item.key || normName;
 
-      result.raions.set(normName, {
+      const raionObj = {
         key,
         name:    item.name || rawName,
         oblast:  item.oblast || item.region || '',
@@ -424,7 +432,16 @@ const NeptunParser = {
         level,
         reasons,
         type:    'raion'
-      });
+      };
+      result.raions.set(normName, raionObj);
+
+      const strippedRaion = normName.replace(/\s+район$/, '').trim();
+      if (strippedRaion && strippedRaion !== normName) {
+        result.raions.set(strippedRaion, raionObj);
+      }
+      if (item.key && typeof item.key === 'string') {
+        result.raions.set(normalizeName(item.key), raionObj);
+      }
     }
 
     // Зворотна сумісність для старого формату data[]
@@ -1498,7 +1515,11 @@ const TelegramFeedService = {
       return;
     }
 
+    const prevScroll = container.scrollTop;
     container.innerHTML = filtered.map(n => this.renderNotificationCard(n)).join('');
+    if (prevScroll > 0) {
+      container.scrollTop = prevScroll;
+    }
   },
 
   renderNotificationCard(n) {
@@ -1948,8 +1969,10 @@ const MapService = {
   },
 
   getDistrictAlert(rayonName, regionName) {
-    const normRayon  = normalizeName(rayonName);
-    const normRegion = normalizeName(regionName);
+    const normRayon      = normalizeName(rayonName);
+    const strippedRayon  = normRayon.replace(/\s+район$/, '').trim();
+    const normRegion     = normalizeName(regionName);
+    const strippedRegion = normRegion.replace(/\s+область$/, '').trim();
 
     if (normRayon === 'київ' || normRegion === 'київ') {
       return State.specialCities.get('київ') || null;
@@ -1962,9 +1985,15 @@ const MapService = {
     if (State.raions.has(normRayon)) {
       return State.raions.get(normRayon);
     }
+    if (strippedRayon && State.raions.has(strippedRayon)) {
+      return State.raions.get(strippedRayon);
+    }
 
     if (normRegion && State.oblasts.has(normRegion)) {
       return State.oblasts.get(normRegion);
+    }
+    if (strippedRegion && State.oblasts.has(strippedRegion)) {
+      return State.oblasts.get(strippedRegion);
     }
 
     if (normRegion.includes('крим') && (State.oblasts.has('крим') || State.oblasts.has('автономна республіка крим'))) {
@@ -1979,15 +2008,19 @@ const MapService = {
     const alert = this.getDistrictAlert(rayonName, regionName);
 
     if (alert && s.layerAlerts) {
-      const color = getAlertColor(alert.level);
-      return {
-        fillColor:   color,
-        fillOpacity: s.zoneOpacity || 0.35,
-        color:       color,
-        weight:      1.5,
-        dashArray:   '',
-        className:   'district-alert-active'
-      };
+      const lvl = (alert.level || '').toLowerCase();
+      // Лише активні тривоги підсвічуються як небезпека (не green, none, clear, inactive)
+      if (lvl === 'red' || lvl === 'yellow' || lvl === 'orange') {
+        const color = getAlertColor(alert.level);
+        return {
+          fillColor:   color,
+          fillOpacity: s.zoneOpacity || 0.35,
+          color:       color,
+          weight:      1.5,
+          dashArray:   '',
+          className:   'district-alert-active'
+        };
+      }
     }
 
     return {
@@ -2160,7 +2193,6 @@ const MapService = {
     const popupRect = popupEl.getBoundingClientRect();
     const header    = document.getElementById('main-header');
     const leftPanel = document.getElementById('left-panel');
-    const rightFeed = document.getElementById('sidebar-feed');
     const mobileNav = document.getElementById('mobile-nav-bar');
     const footer    = document.getElementById('main-footer');
 
@@ -2179,12 +2211,6 @@ const MapService = {
     }
 
     let safeRight = window.innerWidth - 16;
-    if (rightFeed && window.getComputedStyle(rightFeed).display !== 'none' && window.innerWidth >= 1024) {
-      const rfRect = rightFeed.getBoundingClientRect();
-      if (rfRect.left > 0 && rfRect.left < window.innerWidth) {
-        safeRight = Math.min(safeRight, rfRect.left - 16);
-      }
-    }
 
     let shiftX = 0;
     let shiftY = 0;
@@ -2975,7 +3001,11 @@ const AlertsService = {
         </article>`;
     }).join('');
 
+    const prevScroll = container.scrollTop;
     container.innerHTML = html;
+    if (prevScroll > 0) {
+      container.scrollTop = prevScroll;
+    }
   },
 
   // Зворотна сумісність
