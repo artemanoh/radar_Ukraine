@@ -82,7 +82,10 @@ const requiredFiles = [
   'vendor/leaflet.css',
   'vendor/images/marker-icon.png',
   'assets/icons/drone.svg',
-  'assets/icons/missile.svg'
+  'assets/icons/missile.svg',
+  'assets/icons/app_icon.svg',
+  'favicon.svg',
+  'manifest.json'
 ];
 
 console.log('\n🔍 [VALIDATION] Перевірка цілісності збірки:');

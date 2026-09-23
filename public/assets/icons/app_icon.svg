@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#161924" />
+      <stop offset="50%" stop-color="#0a0b10" />
+      <stop offset="100%" stop-color="#050608" />
+    </linearGradient>
+
+    <!-- Radar Beam Gradient -->
+    <linearGradient id="beam-grad" x1="100%" y1="10%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00f3ff" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#00f3ff" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Neon Cyan Glow Filter -->
+    <filter id="glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur1" />
+      <feGaussianBlur stdDeviation="2" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur1" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Signal Red Glow Filter for Threats -->
+    <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur1" />
+      <feGaussianBlur stdDeviation="2" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur1" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Tactical Background Grid Pattern -->
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#ffffff" stroke-width="1" stroke-opacity="0.04" />
+    </pattern>
+  </defs>
+
+  <!-- App Icon Squircle Base -->
+  <rect width="512" height="512" rx="115" fill="url(#bg-grad)" />
+
+  <!-- Inner Glassmorphism/Bezel Border -->
+  <rect x="2" y="2" width="508" height="508" rx="113" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3" />
+  
+  <!-- Grid Layer masked within safe area -->
+  <rect x="16" y="16" width="480" height="480" rx="100" fill="url(#grid)" />
+  
+  <!-- Subtle inner glowing edge -->
+  <rect x="16" y="16" width="480" height="480" rx="100" fill="none" stroke="#00f3ff" stroke-opacity="0.15" stroke-width="1.5" />
+
+  <!-- Concentric Radar Rings -->
+  <g stroke="#00f3ff" fill="none">
+    <circle cx="256" cy="256" r="80" stroke-width="1.5" stroke-dasharray="4 6" opacity="0.25"/>
+    <circle cx="256" cy="256" r="160" stroke-width="2" opacity="0.35"/>
+    <circle cx="256" cy="256" r="240" stroke-width="1.5" stroke-dasharray="1 8" opacity="0.25"/>
+  </g>
+
+  <!-- Precision Crosshairs -->
+  <g stroke="#00f3ff" stroke-width="1.5" opacity="0.3">
+    <!-- Main Axes -->
+    <line x1="256" y1="16" x2="256" y2="496" />
+    <line x1="16" y1="256" x2="496" y2="256" />
+    
+    <!-- Range Tick Marks (Vertical) -->
+    <line x1="250" y1="96" x2="262" y2="96" />
+    <line x1="250" y1="176" x2="262" y2="176" />
+    <line x1="250" y1="336" x2="262" y2="336" />
+    <line x1="250" y1="416" x2="262" y2="416" />
+    
+    <!-- Range Tick Marks (Horizontal) -->
+    <line x1="96" y1="250" x2="96" y2="262" />
+    <line x1="176" y1="250" x2="176" y2="262" />
+    <line x1="336" y1="250" x2="336" y2="262" />
+    <line x1="416" y1="250" x2="416" y2="262" />
+  </g>
+
+  <!-- Radar Sweep Beam (45 Degree Wedge) -->
+  <path d="M 256 256 L 256 16 A 240 240 0 0 1 425.7 86.3 Z" fill="url(#beam-grad)" opacity="0.4" />
+  
+  <!-- Beam Leading Edge Laser Line -->
+  <line x1="256" y1="256" x2="425.7" y2="86.3" stroke="#00f3ff" stroke-width="4" filter="url(#glow-cyan)" />
+
+  <!-- Center Transmitter Node -->
+  <circle cx="256" cy="256" r="6" fill="#00f3ff" filter="url(#glow-cyan)" />
+  <circle cx="256" cy="256" r="14" fill="none" stroke="#00f3ff" stroke-width="2" opacity="0.8" />
+  <circle cx="256" cy="256" r="22" fill="none" stroke="#00f3ff" stroke-width="1" stroke-dasharray="2 4" opacity="0.5" />
+
+  <!-- Target 1: Red Hostile Drone (Delta shape) approaching center -->
+  <g transform="translate(140, 150)">
+    <polyline points="-35,-45 -18,-23 0,0" fill="none" stroke="#ff2a2a" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.7"/>
+    <path d="M 0 -16 L 12 12 L 0 6 L -12 12 Z" fill="#ff2a2a" filter="url(#glow-red)" transform="rotate(130)" />
+    <rect x="18" y="-18" width="55" height="24" fill="#050608" stroke="#ff2a2a" stroke-opacity="0.4" stroke-width="1" rx="3" />
+    <text x="23" y="-6" fill="#ff2a2a" font-family="monospace" font-size="9" font-weight="bold" letter-spacing="0.5">UAV-01</text>
+    <text x="23" y="3" fill="#ff2a2a" font-family="monospace" font-size="7" opacity="0.8">ALT:1.2k</text>
+  </g>
+
+  <!-- Target 2: Blue/Cyan Interceptor / Recon -->
+  <g transform="translate(360, 310)">
+    <polyline points="45,25 22,12 0,0" fill="none" stroke="#00f3ff" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.5"/>
+    <path d="M 0 -14 L 8 10 L 0 5 L -8 10 Z" fill="#00f3ff" filter="url(#glow-cyan)" transform="rotate(-65)" />
+    <rect x="-70" y="8" width="50" height="24" fill="#050608" stroke="#00f3ff" stroke-opacity="0.4" stroke-width="1" rx="3" />
+    <text x="-65" y="20" fill="#00f3ff" font-family="monospace" font-size="9" font-weight="bold" letter-spacing="0.5">INT-X</text>
+    <text x="-65" y="29" fill="#00f3ff" font-family="monospace" font-size="7" opacity="0.8">SPD:800</text>
+  </g>
+  
+  <!-- Top Left Data HUD -->
+  <text x="36" y="48" fill="#00f3ff" font-family="monospace" font-size="12" opacity="0.8" font-weight="bold">SYS.ACTIVE</text>
+  <text x="36" y="64" fill="#00f3ff" font-family="monospace" font-size="10" opacity="0.5">UPLINK: OK</text>
+  <text x="36" y="78" fill="#00f3ff" font-family="monospace" font-size="10" opacity="0.5">SEQ: 8022</text>
+
+  <!-- Top Right Branding HUD -->
+  <text x="476" y="48" fill="#00f3ff" font-family="monospace" font-size="14" opacity="0.9" font-weight="bold" text-anchor="end">РАДАР</text>
+  <text x="476" y="64" fill="#00f3ff" font-family="monospace" font-size="10" opacity="0.5" text-anchor="end">AIR MONITORING</text>
+  
+  <!-- Technical Corner Brackets (Framing) -->
+  <g stroke="#00f3ff" stroke-width="2.5" opacity="0.4" fill="none">
+    <path d="M 32 90 L 32 32 L 90 32" />
+    <path d="M 480 90 L 480 32 L 422 32" />
+    <path d="M 32 422 L 32 480 L 90 480" />
+    <path d="M 480 422 L 480 480 L 422 480" />
+  </g>
+</svg>

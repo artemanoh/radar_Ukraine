@@ -4,7 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>РАДАР — Національний моніторинг повітряного простору</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🇺🇦</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="assets/icons/app_icon.svg">
+  <link rel="alternate icon" href="favicon.svg">
+  <link rel="apple-touch-icon" href="assets/icons/app_icon.svg">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#080b11">
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -90,7 +94,9 @@
       <div class="relative w-16 h-16">
         <div class="absolute inset-0 rounded-full border-2 border-sky-500/20 animate-ping"></div>
         <div class="absolute inset-0 rounded-full border-2 border-t-sky-400 border-r-transparent border-b-sky-400 border-l-transparent animate-spin"></div>
-        <div class="absolute inset-3 rounded-full bg-sky-500/10 flex items-center justify-center text-xl">📡</div>
+        <div class="absolute inset-2 rounded-xl overflow-hidden shadow-lg border border-sky-400/40 bg-black/60">
+          <img src="assets/icons/app_icon.svg" alt="РАДАР" class="w-full h-full object-cover">
+        </div>
       </div>
       <div>
         <h2 class="text-sm font-bold tracking-widest uppercase text-white" id="loading-title">Завантаження даних...</h2>
@@ -115,8 +121,10 @@
     
     <!-- Ліва частина: Логотип та статус режиму -->
     <div class="flex items-center space-x-3">
-      <div class="flex items-center space-x-2 cursor-pointer focus:outline-none focus:ring-1 focus:ring-sky-400 rounded-lg p-1" id="btn-header-logo" tabindex="0" title="РАДАР УКРАЇНА">
-        <span class="text-xl">🇺🇦</span>
+      <div class="flex items-center space-x-2.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-sky-400 rounded-lg p-1 group" id="btn-header-logo" tabindex="0" title="РАДАР УКРАЇНА">
+        <div class="relative w-8 h-8 rounded-lg overflow-hidden border border-sky-400/40 shadow-md group-hover:border-sky-400/80 transition-colors flex-shrink-0 bg-black/60">
+          <img src="assets/icons/app_icon.svg" alt="РАДАР" class="w-full h-full object-cover">
+        </div>
         <div class="flex flex-col">
           <div class="flex items-center gap-1.5">
             <h1 class="text-sm sm:text-base font-black tracking-wider uppercase text-white leading-none">РАДАР</h1>

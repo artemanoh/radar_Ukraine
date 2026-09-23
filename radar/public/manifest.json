@@ -1,0 +1,22 @@
+{
+  "name": "РАДАР — Національний моніторинг повітряного простору",
+  "short_name": "РАДАР",
+  "description": "Тактичний моніторинг повітряного простору України в реальному часі",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#080b11",
+  "theme_color": "#080b11",
+  "icons": [
+    {
+      "src": "assets/icons/app_icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
