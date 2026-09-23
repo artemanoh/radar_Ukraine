@@ -447,6 +447,12 @@ async function analyzeWithGemini(text, followedTerritories = [], apiKey) {
         return reject(new Error(geminiLastError));
       }
 
+      if (statusCode === 402) {
+        geminiCooldownUntil = Date.now() + 300000;
+        geminiLastError = 'Потрібен чистий Free Tier ключ (у вашому проєкті Google Cloud увімкнено платний білінг без кредитів)';
+        return reject(new Error(geminiLastError));
+      }
+
       if (statusCode === 400 || statusCode === 401 || statusCode === 403) {
         // Недійсний ключ або помилка конфігурації
         geminiCooldownUntil = Date.now() + 300000; // 5 хв
