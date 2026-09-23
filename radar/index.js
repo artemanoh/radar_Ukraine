@@ -74,7 +74,7 @@ function fetchNeptunUpstream(endpoint) {
         'Accept': 'application/json',
         'User-Agent': 'Radar-Airspace-Monitor/2.0'
       },
-      timeout: 4500
+      timeout: 8000
     }, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
         return reject(new Error(`Upstream HTTP ${res.statusCode}`));
@@ -99,7 +99,7 @@ function fetchNeptunUpstream(endpoint) {
   });
 }
 
-// Фонова синхронізація з NEPTUN API кожні 3.5 секунди
+// Фонова синхронізація з NEPTUN API кожні 5 секунд
 async function syncFromNeptun() {
   try {
     const [alertsData, threatsData, messagesData] = await Promise.all([
@@ -165,7 +165,7 @@ async function syncFromNeptun() {
 
 // Запуск початкової синхронізації
 syncFromNeptun();
-setInterval(syncFromNeptun, 3500);
+setInterval(syncFromNeptun, 5000);
 
 /* ============================================================
    SSE МЕНЕДЖЕР (SERVER-SENT EVENTS)

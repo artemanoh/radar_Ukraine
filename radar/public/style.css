@@ -458,7 +458,7 @@ body.fullscreen-radar #main-header {
   #map {
     bottom: 3.5rem;
   }
-  #sidebar-feed {
+  #view-alerts {
     bottom: 3.5rem;
   }
   #view-telegram {
@@ -467,6 +467,29 @@ body.fullscreen-radar #main-header {
   #view-ai {
     bottom: 3.5rem;
   }
+}
+
+/* Стилі для вкладки Тривоги */
+#view-alerts {
+  z-index: 35;
+}
+
+#alerts-list-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(239, 68, 68, 0.4) transparent;
+}
+
+#alerts-list-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+#alerts-list-container::-webkit-scrollbar-thumb {
+  background-color: rgba(239, 68, 68, 0.35);
+  border-radius: 9999px;
+}
+
+#alerts-list-container::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 

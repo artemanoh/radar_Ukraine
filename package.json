@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "build": "node scripts/build.js",
+    "preview": "npx serve dist"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -16,5 +18,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
   }
 }

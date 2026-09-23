@@ -16,6 +16,121 @@
  */
 
 /* ============================================================
+   0. GITHUB PAGES & DEPLOYMENT CONFIGURATION
+============================================================ */
+const BASE_PATH = (() => {
+  if (typeof window !== 'undefined' && window.location) {
+    const p = window.location.pathname || '';
+    if (p.startsWith('/radar_Ukraine') || p.includes('/radar_Ukraine/')) {
+      return '/radar_Ukraine/';
+    }
+  }
+  return './';
+})();
+
+const IS_LOCAL_HOST = typeof window !== 'undefined' && window.location && (
+  window.location.hostname === 'localhost' || 
+  window.location.hostname === '127.0.0.1' ||
+  window.location.hostname === '0.0.0.0'
+);
+
+const NEPTUN_REST_BASE = IS_LOCAL_HOST ? '' : 'https://neptun.in.ua';
+
+if (typeof window !== 'undefined' && window.L && window.L.Icon && window.L.Icon.Default) {
+  window.L.Icon.Default.imagePath = BASE_PATH + 'vendor/images/';
+}
+
+/* ============================================================
+   0.1 КЛІЄНТСЬКИЙ NLP АНАЛІЗАТОР ДЛЯ СТАТИЧНОГО ХОСТИНГУ
+============================================================ */
+const KNOWN_UKRAINE_TERRITORIES = [
+  { name: 'Київ', patterns: [/ки[їє]в/i] },
+  { name: 'Київська область', patterns: [/ки[їє]вщин/i, /ки[їє]вськ.*обл/i] },
+  { name: 'Севастополь', patterns: [/севастопол/i] },
+  { name: 'Автономна Республіка Крим', patterns: [/крим/i] },
+  { name: 'Вінницька область', patterns: [/вінниц/i, /жмеринк/i, /могилів-под/i, /гайсин/i, /тульчин/i, /хмільник/i, /козятин/i, /ладижин/i, /калинівк/i, /барськ/i, /бершад/i] },
+  { name: 'Волинська область', patterns: [/волин/i, /луцьк/i, /ковель/i, /нововолинськ/i] },
+  { name: 'Дніпропетровська область', patterns: [/дніпр/i, /крив.*ріг/i, /криворіз/i, /нікопол/i, /павлоград/i, /кам'янськ/i] },
+  { name: 'Донецька область', patterns: [/донец/i, /краматорськ/i, /слов'янськ/i, /покровськ/i, /костянтинівк/i] },
+  { name: 'Житомирська область', patterns: [/житомир/i, /бердичів/i, /коростен/i, /новоград/i, /звягель/i] },
+  { name: 'Закарпатська область', patterns: [/закарпат/i, /ужгород/i, /мукачев/i, /хуст/i] },
+  { name: 'Запорізька область', patterns: [/запоріж/i, /мелітопол/i, /бердянськ/i, /полож/i] },
+  { name: 'Івано-Франківська область', patterns: [/івано-франків/i, /прикарпат/i, /калуш/i, /коломи/i] },
+  { name: 'Кіровоградська область', patterns: [/кіровоград/i, /кропивницьк/i, /олександрі/i, /знам'янк/i] },
+  { name: 'Луганська область', patterns: [/луганськ/i, /сєвєродонец/i, /лисичанськ/i] },
+  { name: 'Львівська область', patterns: [/львів/i, /дрогобич/i, /стрий/i, /червоноград/i] },
+  { name: 'Миколаївська область', patterns: [/микола[їє]в/i, /вознесенськ/i, /первомайськ/i, /очаків/i] },
+  { name: 'Одеська область', patterns: [/одес/i, /чорноморськ/i, /ізма[їє]л/i, /білгород-дністров/i] },
+  { name: 'Полтавська область', patterns: [/полтав/i, /кременчук/i, /лубн/i, /миргород/i] },
+  { name: 'Рівненська область', patterns: [/рівнен/i, /рівн[ое]/i, /вараш/i, /дубн/i, /сарн/i] },
+  { name: 'Сумська область', patterns: [/сумськ/i, /сум[иа]/i, /конотоп/i, /шостк/i, /охтирк/i, /ромен/i] },
+  { name: 'Тернопільська область', patterns: [/тернопіль/i, /чортків/i, /кременец/i] },
+  { name: 'Харківська область', patterns: [/харків/i, /чугу[їє]в/i, /ізюм/i, /куп'янськ/i, /лозов/i] },
+  { name: 'Херсонська область', patterns: [/херсон/i, /берислав/i, /каховк/i, /генічеськ/i] },
+  { name: 'Хмельницька область', patterns: [/хмельницьк/i, /кам'янець-подільськ/i, /шепетівк/i, /старокостянтинів/i] },
+  { name: 'Черкаська область', patterns: [/черкас/i, /умань/i, /сміл/i, /золотонош/i] },
+  { name: 'Чернівецька область', patterns: [/чернівц/i, /буковин/i, /новоселиц/i] },
+  { name: 'Чернігівська область', patterns: [/чернігів/i, /ніжин/i, /прилук/i] }
+];
+
+function analyzeWithLocalNlp(text, followedTerritories = []) {
+  const detectedTerritories = [];
+  for (const item of KNOWN_UKRAINE_TERRITORIES) {
+    if (item.patterns.some(p => p.test(text))) {
+      detectedTerritories.push(item.name);
+    }
+  }
+
+  let relevant = true;
+  if (Array.isArray(followedTerritories) && followedTerritories.length > 0) {
+    const followedLower = followedTerritories.map(t => String(t).toLowerCase());
+    relevant = detectedTerritories.some(d => followedLower.some(f => f.includes(d.toLowerCase()) || d.toLowerCase().includes(f))) ||
+               followedLower.some(f => text.toLowerCase().includes(f));
+  }
+
+  const tLower = text.toLowerCase();
+  let category = 'info';
+  if (/відбій|чисто|відбій загрози|локаційно втрачено/i.test(tLower)) {
+    category = 'clear';
+  } else if (/летить|курс|напрямок|рухається|в напрямку|атака|удар|вибух/i.test(tLower)) {
+    category = 'active_threat';
+  } else if (/загроза|можлива|імовірність|тривога|увага|попередження|активність/i.test(tLower)) {
+    category = 'possible_threat';
+  }
+
+  const timeMatch = text.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
+  const timeMentioned = timeMatch ? timeMatch[0] : null;
+
+  let summary = '';
+  if (detectedTerritories.length > 0) {
+    const terrStr = detectedTerritories.join(', ');
+    if (category === 'active_threat') {
+      summary = `Повідомляється про активну загрозу / рух повітряних цілей щодо: ${terrStr}.`;
+    } else if (category === 'possible_threat') {
+      summary = `Повідомляється про можливу небезпеку або тривогу щодо: ${terrStr}.`;
+    } else if (category === 'clear') {
+      summary = `Повідомляється про відбій небезпеки щодо: ${terrStr}.`;
+    } else {
+      summary = `Інформаційне повідомлення, що згадує: ${terrStr}.`;
+    }
+  } else {
+    summary = `Загальне оперативне повідомлення з моніторингового каналу.`;
+  }
+
+  return {
+    relevant,
+    territories: detectedTerritories,
+    category,
+    timeMentioned,
+    summary,
+    confidence: 0.92,
+    sourceBased: true,
+    engine: 'client-local-nlp',
+    analyzedAt: new Date().toISOString()
+  };
+}
+
+/* ============================================================
    1. КОДУВАННЯ UTF-8 ТА ДЕКОДУВАННЯ HTTP-ВІДПОВІДЕЙ
 ============================================================ */
 const win1251BytesToUnicode = new Map();
@@ -856,9 +971,18 @@ const PollingService = {
     this._inflight = true;
 
     try {
+      const alertsUrl = NEPTUN_REST_BASE ? `${NEPTUN_REST_BASE}/api/v1/alerts` : '/api/v1/alerts';
+      const threatsUrl = NEPTUN_REST_BASE ? `${NEPTUN_REST_BASE}/api/v1/threats` : '/api/v1/threats';
+
       const [rawAlerts, rawThreats] = await Promise.all([
-        fetchUtf8Json('/api/v1/alerts'),
-        fetchUtf8Json('/api/v1/threats')
+        fetchUtf8Json(alertsUrl).catch(async (err) => {
+          if (!NEPTUN_REST_BASE) return fetchUtf8Json('https://neptun.in.ua/api/v1/alerts');
+          throw err;
+        }),
+        fetchUtf8Json(threatsUrl).catch(async (err) => {
+          if (!NEPTUN_REST_BASE) return fetchUtf8Json('https://neptun.in.ua/api/v1/threats');
+          throw err;
+        })
       ]);
 
       const parsedAlerts  = NeptunParser.parseAlerts(rawAlerts);
@@ -1088,7 +1212,7 @@ const TelegramFeedService = {
 
   async fetchLlmStatus() {
     try {
-      const res = await fetchUtf8Json('/api/v1/llm-status');
+      const res = await fetchUtf8Json('/api/v1/llm-status').catch(() => null);
       if (res && res.status === 'ok') {
         this.llmEngine = res.engine;
         this.hasApiKey = res.hasApiKey;
@@ -1096,8 +1220,14 @@ const TelegramFeedService = {
         if (badge) {
           badge.textContent = res.hasApiKey ? 'LLM: Gemini 1.5 Flash' : 'LLM: Локальний NLP';
         }
+      } else {
+        const badge = document.getElementById('tg-llm-badge-text');
+        if (badge) badge.textContent = 'LLM: Клієнтський NLP';
       }
-    } catch (e) {}
+    } catch (e) {
+      const badge = document.getElementById('tg-llm-badge-text');
+      if (badge) badge.textContent = 'LLM: Клієнтський NLP';
+    }
   },
 
   async handleIncomingMessages(messagesList, newMessages = []) {
@@ -1151,47 +1281,60 @@ const TelegramFeedService = {
     const key = msg.id || `${msg.channel || ''}::${msg.date || ''}::${(msg.text || '').slice(0, 40)}`;
     if (this.analyzedCache.has(key)) return;
 
+    let analysis = null;
+
+    // 1. Спроба через серверний endpoint (якщо запущено з бекендом)
     try {
       const res = await fetch('/api/v1/analyze-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg, followedTerritories: followedList })
-      });
-      if (res.ok) {
-        const data = await res.json();
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const data = await res.json().catch(() => null);
         if (data && data.analysis) {
-          this.analyzedCache.set(key, data.analysis);
-          msg._analysis = data.analysis;
-
-          // Оновлюємо сповіщення аналітикою LLM
-          const notif = this.notifications.find(n => n.id === `msg_${key}` || n.sourceId === msg.id);
-          if (notif) {
-            notif.analysis = {
-              ...data.analysis,
-              analyzedAt: new Date().toISOString()
-            };
-            if (data.analysis.territories && data.analysis.territories.length) {
-              notif.territory = data.analysis.territories.join(', ');
-            }
-            this.saveNotifications();
-          }
-
-          const s = StorageManager.getSettings();
-          if (data.analysis.relevant && s.llmAnalysisEnabled && !isInitialLoad) {
-            if (data.analysis.category === 'active_threat' || data.analysis.category === 'possible_threat') {
-              SoundService.playInfoChime();
-              NotificationManager.send(`🟡 LLM [${data.analysis.territories.join(', ')}]`, data.analysis.summary);
-            }
-          }
-
-          if (NavigationController.currentTab === 'telegram') {
-            this.render();
-          } else if (NavigationController.currentTab === 'ai') {
-            AIService?.render();
-          }
+          analysis = data.analysis;
         }
       }
     } catch (e) {}
+
+    // 2. Безпечний клієнтський fallback (працює на GitHub Pages без сервера)
+    if (!analysis) {
+      analysis = analyzeWithLocalNlp(msg.text || '', followedList);
+    }
+
+    if (analysis) {
+      this.analyzedCache.set(key, analysis);
+      msg._analysis = analysis;
+
+      // Оновлюємо сповіщення аналітикою LLM/NLP
+      const notif = this.notifications.find(n => n.id === `msg_${key}` || n.sourceId === msg.id);
+      if (notif) {
+        notif.analysis = {
+          ...analysis,
+          analyzedAt: new Date().toISOString()
+        };
+        if (analysis.territories && analysis.territories.length) {
+          notif.territory = analysis.territories.join(', ');
+        }
+        this.saveNotifications();
+      }
+
+      const s = StorageManager.getSettings();
+      if (analysis.relevant && s.llmAnalysisEnabled && !isInitialLoad) {
+        if (analysis.category === 'active_threat' || analysis.category === 'possible_threat') {
+          SoundService.playInfoChime();
+          NotificationManager.send(`🟡 LLM [${(analysis.territories || []).join(', ')}]`, analysis.summary);
+        }
+      }
+
+      if (NavigationController.currentTab === 'telegram') {
+        this.render();
+      } else if (NavigationController.currentTab === 'ai') {
+        AIService?.render();
+      }
+    }
   },
 
   updateCounters() {
@@ -1493,7 +1636,11 @@ const MessagesService = {
 
   async poll() {
     try {
-      const data = await fetchUtf8Json('/api/v1/messages');
+      const messagesUrl = NEPTUN_REST_BASE ? `${NEPTUN_REST_BASE}/api/v1/messages` : '/api/v1/messages';
+      const data = await fetchUtf8Json(messagesUrl).catch(async () => {
+        if (!NEPTUN_REST_BASE) return fetchUtf8Json('https://neptun.in.ua/api/v1/messages');
+        return { messages: [] };
+      });
       const messagesList = Array.isArray(data.messages) ? data.messages : [];
 
       if (this.isInitialMessagesLoad) {
@@ -1742,7 +1889,7 @@ const MapService = {
 
   async loadDistrictsGeoJson() {
     try {
-      const data = await fetchUtf8Json('/ukraine_districts.geojson');
+      const data = await fetchUtf8Json(`${BASE_PATH}ukraine_districts.geojson`);
 
       this.districtsGeoJsonLayer = L.geoJSON(data, {
         style:         (f) => this.getDistrictStyle(f.properties.rayon, f.properties.region),
@@ -1787,7 +1934,7 @@ const MapService = {
 
   async loadRegionsOutline() {
     try {
-      const data = await fetchUtf8Json('/ukraine_regions.geojson');
+      const data = await fetchUtf8Json(`${BASE_PATH}ukraine_regions.geojson`);
       this.regionsOutlineLayer = L.geoJSON(data, {
         style: {
           fill:        false,
@@ -2411,14 +2558,18 @@ const TerritoriesManager = {
 
   async load() {
     try {
-      const data = await fetchUtf8Json('/api/v1/territories');
+      const territoriesUrl = NEPTUN_REST_BASE ? `${NEPTUN_REST_BASE}/api/v1/territories` : '/api/v1/territories';
+      const data = await fetchUtf8Json(territoriesUrl).catch(async () => {
+        if (!NEPTUN_REST_BASE) return fetchUtf8Json('https://neptun.in.ua/api/v1/territories');
+        throw new Error('Territories API unavailable');
+      });
       this.hierarchy = data.hierarchy || [];
       this.flat      = data.flat || [];
       this.byId.clear();
       for (const item of this.flat) this.byId.set(item.id, item);
     } catch (err) {
       console.warn('[TerritoriesManager] Завантаження з локального файлу...');
-      const data = await fetchUtf8Json('/territories.json');
+      const data = await fetchUtf8Json(`${BASE_PATH}territories.json`);
       this.hierarchy = data.hierarchy || [];
       this.flat      = data.flat || [];
       this.byId.clear();
@@ -3172,7 +3323,7 @@ const UIController = {
     });
 
     document.getElementById('btn-mobile-toggle-feed')?.addEventListener('click', () => {
-      document.getElementById('sidebar-feed')?.classList.toggle('translate-x-[110%]');
+      NavigationController.switchTab('alerts');
     });
 
     // Reconnect з debounce / guard
@@ -3381,9 +3532,9 @@ const SoundService = {
 
   init() {
     try {
-      this.sirenAudio = new Audio('/sounds/siren.ogg');
+      this.sirenAudio = new Audio(`${BASE_PATH}sounds/siren.ogg`);
       this.sirenAudio.preload = 'auto';
-      this.chimeAudio = new Audio('/sounds/chime.ogg');
+      this.chimeAudio = new Audio(`${BASE_PATH}sounds/chime.ogg`);
       this.chimeAudio.preload = 'auto';
     } catch (e) {
       console.warn('[SoundService] Audio error:', e);
@@ -3602,7 +3753,7 @@ const AIService = {
 
   async fetchEngineStatus(notify = false) {
     try {
-      const res = await fetchUtf8Json('/api/v1/llm-status');
+      const res = await fetchUtf8Json('/api/v1/llm-status').catch(() => null);
       if (res && res.status === 'ok') {
         const providerEl = document.getElementById('ai-provider-name');
         const tagEl      = document.getElementById('ai-engine-status-tag');
@@ -3638,6 +3789,20 @@ const AIService = {
         }
 
         if (notify) showToast('✅ Статус ШІ оновлено');
+      } else {
+        // Клієнтський режим для GitHub Pages
+        const providerEl = document.getElementById('ai-provider-name');
+        const tagEl      = document.getElementById('ai-engine-status-tag');
+        const cacheEl    = document.getElementById('ai-cache-val');
+        if (providerEl) providerEl.textContent = 'Клієнтський NLP (Static Mode)';
+        if (tagEl) {
+          tagEl.textContent = 'CLIENT NLP';
+          tagEl.className   = 'px-2 py-0.5 rounded text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-400/30 font-bold';
+        }
+        if (cacheEl) {
+          cacheEl.textContent = `${TelegramFeedService?.analyzedCache?.size || 0} записів`;
+        }
+        if (notify) showToast('ℹ️ Режим: Клієнтський аналітичний NLP');
       }
     } catch (e) {
       if (notify) showToast('⚠️ Помилка перевірки статусу ШІ');
@@ -3659,22 +3824,35 @@ const AIService = {
 
     try {
       const start = performance.now();
-      const res = await fetch('/api/v1/analyze-message', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          message:             { text, date: new Date().toISOString() },
-          followedTerritories: Array.from(FollowManager.followedSet)
-        })
-      });
+      let analysis = null;
+
+      try {
+        const res = await fetch('/api/v1/analyze-message', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            message:             { text, date: new Date().toISOString() },
+            followedTerritories: Array.from(FollowManager.followedSet)
+          })
+        }).catch(() => null);
+
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && data.analysis) analysis = data.analysis;
+        }
+      } catch (e) {}
+
+      if (!analysis) {
+        analysis = analyzeWithLocalNlp(text, Array.from(FollowManager.followedSet));
+      }
+
       const latency = Math.round(performance.now() - start);
-      const data    = await res.json();
 
       const latEl = document.getElementById('ai-latency-val');
       if (latEl) latEl.textContent = `${latency} ms`;
 
-      if (data && data.analysis) {
-        const a = data.analysis;
+      if (analysis) {
+        const a = analysis;
         const isThreat = a.category === 'active_threat';
         const isMvmt   = a.category === 'possible_threat';
         const catBadge = isThreat ? '🔴 ПРЯМА ЗАГРОЗА' : (isMvmt ? '🟠 МОЖЛИВА ЗАГРОЗА' : '🔵 ОБСТАНОВКА');
@@ -3686,7 +3864,7 @@ const AIService = {
           </div>
           <div class="text-[11px] text-gray-300"><b>Території:</b> ${a.territories && a.territories.length ? a.territories.join(', ') : 'Не виявлено'}</div>
           <div class="text-[11px] text-purple-200"><b>Висновки:</b> ${escapeHtml(a.summary || '')}</div>
-          <div class="text-[10px] text-gray-400 font-mono">Впевненість: ${Math.round((a.confidence || 0.9) * 100)}% | Рушій: ${a.engine || 'local-nlp'}</div>
+          <div class="text-[10px] text-gray-400 font-mono">Впевненість: ${Math.round((a.confidence || 0.9) * 100)}% | Рушій: ${a.engine || 'client-local-nlp'}</div>
         `;
       } else {
         outEl.innerHTML = '<span class="text-red-400">Помилка обробки повідомлення</span>';

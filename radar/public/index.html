@@ -142,10 +142,14 @@
       </div>
     </div>
 
-    <!-- Вкладки навігації (Карта / Сповіщення / ШІ / Налаштування) -->
+    <!-- Вкладки навігації (Вимога: Карта | Тривоги | Сповіщення | ШІ | Налаштування) -->
     <nav class="flex items-center space-x-1 bg-black/50 p-1 rounded-xl border border-white/10" id="main-nav-tabs" role="tablist">
       <button id="tab-btn-map" role="tab" aria-selected="true" class="nav-tab active px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all bg-sky-600 text-white shadow">
         <span>🗺️</span> <span>Карта</span>
+      </button>
+      <button id="tab-btn-alerts" role="tab" aria-selected="false" class="nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка Офіційні тривоги">
+        <span>🚨</span> <span>Тривоги</span>
+        <span id="nav-alerts-badge" class="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-red-600 text-white font-bold leading-tight hidden">0</span>
       </button>
       <button id="tab-btn-telegram" role="tab" aria-selected="false" class="nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка Сповіщення">
         <span>🔔</span> <span>Сповіщення</span>
@@ -345,40 +349,93 @@
 
   </aside>
 
+  <!-- Компактний статус поточної ситуації на карті (при кліку перехід у вкладку "Тривоги") -->
+  <div id="map-alerts-chip" class="absolute top-20 right-3 z-20 cursor-pointer liquid-glass rounded-xl px-3 py-2 border border-white/10 hover:border-red-500/50 shadow-lg transition-all flex items-center gap-2 group" title="Перейти до офіційного списку тривог">
+    <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+    <span id="map-alerts-chip-text" class="text-xs font-mono font-bold text-white group-hover:text-red-300">🚨 0 тривог</span>
+    <span class="text-[10px] text-gray-400 group-hover:text-white">→</span>
+  </div>
+
   <!-- ========================================================
-       4. ПРАВА ПАНЕЛЬ — ОФІЦІЙНІ ТРИВОГИ ТА ЦІЛІ (КАРТА)
+       ОКРЕМА ВКЛАДКА: ОФІЦІЙНІ ТРИВОГИ (NEPTUN API)
+       Повноцінний вертикальний скрол, реальний час since, фільтри за регіоном
   ======================================================== -->
-  <aside id="sidebar-feed" class="absolute top-18 right-2 bottom-8 w-80 sm:w-96 liquid-glass rounded-xl z-20 flex flex-col transition-transform duration-300 transform translate-x-[110%] lg:translate-x-0">
+  <main id="view-alerts" class="hidden absolute top-18 left-2 right-2 bottom-8 liquid-glass rounded-2xl z-30 p-3 sm:p-5 flex flex-col border border-red-500/30 shadow-2xl backdrop-blur-xl overflow-hidden">
     
-    <!-- Шапка стрічки -->
-    <div class="p-3 border-b border-white/10 flex items-center justify-between flex-shrink-0 bg-black/25 rounded-t-xl">
-      <div class="flex items-center space-x-2">
-        <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
-        <h2 class="text-xs font-bold uppercase tracking-wider text-white">ОФІЦІЙНІ ТРИВОГИ ТА ЦІЛІ</h2>
+    <!-- Шапка вкладки Тривоги -->
+    <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pb-3 border-b border-white/10 mb-3 flex-shrink-0">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🚨</span>
+          <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Офіційні повітряні тривоги України</h2>
+          <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-red-500/20 text-red-300 border border-red-500/30 font-bold">NEPTUN API</span>
+        </div>
+        <p class="text-[11px] text-gray-400 mt-0.5">Фактичний час початку (since) з системи оповіщення. Сортування від найновіших.</p>
       </div>
-      <span class="text-[10px] font-mono text-gray-400" id="feed-items-total">0 подій</span>
+
+      <!-- Статистичні лічильники тривог -->
+      <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+        <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-red-500/30 flex items-center gap-1.5">
+          <span class="text-red-400 font-semibold">АКТИВНИХ:</span>
+          <span id="alerts-stat-active" class="text-white font-bold">0</span>
+        </div>
+        <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-red-600/30 flex items-center gap-1.5">
+          <span class="text-red-500 font-semibold">ЧЕРВОНИЙ:</span>
+          <span id="alerts-stat-red" class="text-red-300 font-bold">0</span>
+        </div>
+        <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-yellow-500/30 flex items-center gap-1.5">
+          <span class="text-yellow-400 font-semibold">ЖОВТИЙ:</span>
+          <span id="alerts-stat-yellow" class="text-yellow-300 font-bold">0</span>
+        </div>
+        <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-emerald-500/30 flex items-center gap-1.5">
+          <span class="text-emerald-400 font-semibold">ВІДБОЇ:</span>
+          <span id="alerts-stat-cleared" class="text-emerald-300 font-bold">0</span>
+        </div>
+      </div>
     </div>
 
-    <!-- Плаваюча кнопка "+N нових подій" при прокрутці вниз -->
-    <div id="new-events-pill" class="hidden absolute top-12 left-1/2 transform -translate-x-1/2 z-30">
-      <button id="btn-scroll-top-feed" class="px-3 py-1 rounded-full bg-sky-500 hover:bg-sky-400 text-white font-bold text-xs shadow-lg border border-white/30 animate-bounce flex items-center gap-1">
-        ↑ <span id="new-events-count">1</span> нові події
-      </button>
+    <!-- Панель фільтрів та швидкого пошуку -->
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pb-2.5 flex-shrink-0">
+      
+      <!-- Фільтри категорій тривог -->
+      <div class="flex flex-wrap items-center bg-black/50 p-1 rounded-lg border border-white/15 text-xs font-mono gap-1">
+        <button id="alerts-filter-all" class="alerts-filter-btn active px-2.5 py-1 rounded font-semibold bg-red-600 text-white transition-colors" data-filter="all">
+          Всі (<span id="alerts-count-all">0</span>)
+        </button>
+        <button id="alerts-filter-red" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" data-filter="red">
+          🔴 Червоний (<span id="alerts-count-red">0</span>)
+        </button>
+        <button id="alerts-filter-yellow" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" data-filter="yellow">
+          🟡 Жовтий (<span id="alerts-count-yellow">0</span>)
+        </button>
+        <button id="alerts-filter-followed" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" data-filter="followed">
+          ⭐ Мої території (<span id="alerts-count-followed">0</span>)
+        </button>
+        <button id="alerts-filter-history" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" data-filter="history">
+          ✅ Відбої (<span id="alerts-count-history">0</span>)
+        </button>
+      </div>
+
+      <!-- Пошук по території / району / області -->
+      <div class="relative w-full sm:w-64 flex-shrink-0">
+        <input id="alerts-input-search" type="text" placeholder="Пошук області або району..." class="w-full bg-black/60 border border-white/15 text-xs text-gray-100 rounded-lg pl-2.5 pr-7 py-1.5 outline-none focus:border-red-400 placeholder-gray-500 font-sans" aria-label="Пошук тривог">
+        <button id="alerts-btn-clear-search" class="absolute right-2 top-1.5 text-gray-400 hover:text-white text-xs hidden" aria-label="Очистити пошук">✕</button>
+      </div>
     </div>
 
-    <!-- Стрічка подій -->
-    <div id="feed-container" class="flex-1 overflow-y-auto p-2.5 space-y-2 relative" tabindex="0" aria-label="Стрічка офіційних тривог та цілей">
-      <!-- Заглушка порожньої стрічки -->
-      <div id="feed-empty-placeholder" class="text-center py-20 text-gray-400">
-        <div class="w-10 h-10 mx-auto mb-2 text-emerald-400 flex items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20 text-lg font-bold">
+    <!-- Список тривог з повноцінним вертикальним скролом (без обрізання та фіксованої висоти) -->
+    <div id="alerts-list-container" class="flex-1 overflow-y-auto space-y-2.5 pr-1 sm:pr-2 pb-14 focus:outline-none" tabindex="0" aria-label="Список офіційних тривог">
+      <!-- Заглушка, якщо тривог немає -->
+      <div id="alerts-empty-placeholder" class="text-center py-24 text-gray-400">
+        <div class="w-12 h-12 mx-auto mb-2 text-emerald-400 flex items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xl font-bold">
           ✓
         </div>
-        <p class="text-xs font-semibold text-gray-200">Повітряний простір спокійний</p>
-        <p class="text-[11px] text-gray-400 mt-0.5">Активних тривог або загроз не зафіксовано</p>
+        <p class="text-sm font-semibold text-gray-200">Повітряний простір спокійний</p>
+        <p class="text-xs text-gray-400 mt-1">Офіційних повітряних тривог для обраних критеріїв не зафіксовано</p>
       </div>
     </div>
 
-  </aside>
+  </main>
 
   <!-- ========================================================
        5. ВКЛАДКА TELEGRAM / СПОВІЩЕННЯ (ОКРЕМИЙ ВИД)
@@ -594,15 +651,20 @@
   <!-- ========================================================
        6. Мобільна нижня панель перемикання вкладок
   ======================================================== -->
-  <nav id="mobile-nav-bar" class="lg:hidden fixed bottom-0 left-0 right-0 h-12 liquid-glass z-40 flex items-center justify-around px-2 border-t border-white/15 bg-black/90 backdrop-blur-xl">
+  <nav id="mobile-nav-bar" class="lg:hidden fixed bottom-0 left-0 right-0 h-12 liquid-glass z-40 flex items-center justify-around px-1 border-t border-white/15 bg-black/90 backdrop-blur-xl">
     <button id="m-tab-map" class="mobile-tab active flex flex-col items-center justify-center py-0.5 text-[10px] font-semibold text-sky-400">
       <span class="text-base leading-none">🗺️</span>
       <span>Карта</span>
     </button>
+    <button id="m-tab-alerts" class="mobile-tab flex flex-col items-center justify-center py-0.5 text-[10px] font-medium text-gray-400 relative" aria-label="Вкладка Офіційні тривоги">
+      <span class="text-base leading-none">🚨</span>
+      <span>Тривоги</span>
+      <span id="m-nav-alerts-badge" class="hidden absolute top-0 right-2 px-1 py-0.2 rounded-full text-[9px] font-mono bg-red-600 text-white font-bold leading-tight">0</span>
+    </button>
     <button id="m-tab-telegram" class="mobile-tab flex flex-col items-center justify-center py-0.5 text-[10px] font-medium text-gray-400 relative" aria-label="Вкладка Сповіщення">
       <span class="text-base leading-none">🔔</span>
       <span>Сповіщення</span>
-      <span id="m-tg-badge" class="hidden absolute top-0.5 right-6 w-2 h-2 rounded-full bg-sky-400"></span>
+      <span id="m-tg-badge" class="hidden absolute top-0.5 right-4 w-2 h-2 rounded-full bg-sky-400"></span>
     </button>
     <button id="m-tab-ai" class="mobile-tab flex flex-col items-center justify-center py-0.5 text-[10px] font-medium text-gray-400 relative" aria-label="Вкладка ШІ">
       <span class="text-base leading-none">🧠</span>
