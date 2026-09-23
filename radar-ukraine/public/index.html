@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="uk" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>РАДАР — Національний моніторинг повітряного простору</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            radar: {
+              bg: '#0a0d14',
+              surface: 'rgba(18, 18, 18, 0.45)',
+              border: 'rgba(255, 255, 255, 0.12)',
+              accent: '#58a6ff',
+              danger: '#f85149',
+              warning: '#f59e0b',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Leaflet.js CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <!-- Кастомні Liquid Glass стилі -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-radar-bg text-gray-100 h-screen w-screen overflow-hidden font-sans select-none relative">
+
+  <!-- ========================================================
+       КАРТА — АБСОЛЮТНИЙ ФОН НА 100vh ТА 100vw
+  ======================================================== -->
+  <div id="map" class="absolute inset-0 w-full h-full z-0"></div>
+
+  <!-- ========================================================
+       HEADER — СКЛЯНА СМУГА (LIQUID GLASS)
+  ======================================================== -->
+  <header class="absolute top-3 left-3 right-3 h-14 liquid-glass rounded-xl px-4 flex items-center justify-between z-30">
+    <!-- Логотип та статус -->
+    <div class="flex items-center space-x-3">
+      <div class="relative flex items-center justify-center w-7 h-7">
+        <span id="conn-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+        <span id="conn-dot" class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold tracking-wider uppercase text-white flex items-center gap-2">
+          РАДАР УКРАЇНА
+          <span class="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.5 rounded font-mono font-normal">LIVE</span>
+        </h1>
+        <p id="system-status-text" class="text-[10px] text-gray-400 font-mono">Моніторинг 24/7</p>
+      </div>
+    </div>
+
+    <!-- Селектор регіону, лічильник та кнопка налаштувань ⚙️ -->
+    <div class="flex items-center space-x-2 sm:space-x-3">
+      
+      <!-- Селектор регіонів -->
+      <div class="flex items-center space-x-1.5">
+        <span class="hidden md:inline text-xs text-gray-300">Регіон:</span>
+        <select id="select-region" class="bg-black/50 border border-white/15 text-gray-100 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-blue-400 font-medium backdrop-blur-md">
+          <option value="all">Усі регіони (Вся Україна)</option>
+          <option value="Вінницька область">Вінницька область</option>
+          <option value="Київська область">Київська область / м. Київ</option>
+          <option value="Харківська область">Харківська область</option>
+          <option value="Дніпропетровська область">Дніпропетровська область</option>
+          <option value="Одеська область">Одеська область</option>
+          <option value="Львівська область">Львівська область</option>
+          <option value="Запорізька область">Запорізька область</option>
+          <option value="Миколаївська область">Миколаївська область</option>
+          <option value="Полтавська область">Полтавська область</option>
+          <option value="Черкаська область">Черкаська область</option>
+          <option value="Житомирська область">Житомирська область</option>
+          <option value="Сумська область">Сумська область</option>
+          <option value="Чернігівська область">Чернігівська область</option>
+          <option value="Хмельницька область">Хмельницька область</option>
+          <option value="Рівненська область">Рівненська область</option>
+          <option value="Волинська область">Волинська область</option>
+          <option value="Івано-Франківська область">Івано-Франківська область</option>
+          <option value="Тернопільська область">Тернопільська область</option>
+          <option value="Закарпатська область">Закарпатська область</option>
+          <option value="Чернівецька область">Чернівецька область</option>
+          <option value="Кіровоградська область">Кіровоградська область</option>
+          <option value="Херсонська область">Херсонська область</option>
+          <option value="Донецька область">Донецька область</option>
+          <option value="Луганська область">Луганська область</option>
+          <option value="Автономна Республіка Крим">АР Крим</option>
+        </select>
+      </div>
+
+      <!-- Лічильник активних загроз -->
+      <div class="flex items-center bg-black/40 border border-white/10 rounded-lg px-2.5 py-1 text-xs">
+        <span class="text-gray-400 mr-1.5 hidden sm:inline">Загроз:</span>
+        <span id="active-count-badge" class="font-bold text-emerald-400 font-mono">0</span>
+      </div>
+
+      <!-- Кнопка відкриття модалки налаштувань сповіщень ⚙️ -->
+      <button id="btn-open-settings" title="Налаштування сповіщень" class="p-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-gray-200 transition-all flex items-center justify-center">
+        <span class="text-base leading-none">⚙️</span>
+      </button>
+
+      <!-- Мобільна кнопка стрічки -->
+      <button id="btn-toggle-sidebar" class="lg:hidden p-2 rounded-lg border border-white/15 bg-white/5 text-gray-200">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================
+       LEFT MENU — СКЛЯНА ПАНЕЛЬ ФІЛЬТРІВ + СКЛЯНИЙ ПОВЗУНОК
+  ======================================================== -->
+  <aside class="absolute top-20 left-3 z-20 flex flex-col space-y-3 w-52 sm:w-60">
+    <!-- Блок кнопок фільтрації -->
+    <div class="liquid-glass rounded-xl p-2.5 flex flex-col space-y-1.5">
+      <span class="text-[10px] uppercase font-bold tracking-wider text-gray-400 px-1 mb-0.5">Фільтри цілей</span>
+      <button data-filter="all" class="filter-btn active w-full text-left px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600/80 text-white border border-blue-400/40 transition-all flex items-center justify-between">
+        <span>Всі цілі</span>
+        <span class="text-[10px] opacity-70">●</span>
+      </button>
+      <button data-filter="bpla" class="filter-btn w-full text-left px-3 py-1.5 text-xs font-medium rounded-lg text-gray-200 hover:bg-white/10 transition-all flex items-center justify-between">
+        <span>Ударні БПЛА</span>
+        <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+      </button>
+      <button data-filter="missile" class="filter-btn w-full text-left px-3 py-1.5 text-xs font-medium rounded-lg text-gray-200 hover:bg-white/10 transition-all flex items-center justify-between">
+        <span>Ракети (Крилаті/Бал.)</span>
+        <span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
+      </button>
+      <button data-filter="avia" class="filter-btn w-full text-left px-3 py-1.5 text-xs font-medium rounded-lg text-gray-200 hover:bg-white/10 transition-all flex items-center justify-between">
+        <span>Авіація</span>
+        <span class="w-2 h-2 rounded-full bg-sky-400 inline-block"></span>
+      </button>
+      <button data-filter="recon" class="filter-btn w-full text-left px-3 py-1.5 text-xs font-medium rounded-lg text-gray-200 hover:bg-white/10 transition-all flex items-center justify-between">
+        <span>Розвідка (БПЛА)</span>
+        <span class="w-2 h-2 rounded-full bg-purple-400 inline-block"></span>
+      </button>
+    </div>
+
+    <!-- Скляний повзунок керування прозорістю зон тривоги -->
+    <div class="liquid-glass rounded-xl p-3 flex flex-col space-y-2">
+      <div class="flex items-center justify-between text-xs">
+        <span class="text-gray-300 font-medium">Прозорість зон</span>
+        <span id="opacity-value-display" class="font-mono text-blue-400 font-bold">30%</span>
+      </div>
+      <input id="range-zone-opacity" type="range" min="0.05" max="0.8" step="0.05" value="0.3" class="glass-range">
+      <p class="text-[10px] text-gray-400 leading-tight">Базово 30% підсвітки для збереження видимості міст</p>
+    </div>
+  </aside>
+
+  <!-- ========================================================
+       SIDEBAR — ПРАВА ПАНЕЛЬ: ОПЕРАТИВНА СТРІЧКА
+  ======================================================== -->
+  <aside id="sidebar-panel" class="absolute top-20 right-3 bottom-3 w-80 sm:w-96 liquid-glass rounded-xl z-20 flex flex-col transition-transform duration-300 transform translate-x-[110%] lg:translate-x-0">
+    <!-- Заголовок стрічки -->
+    <div class="p-3 border-b border-white/10 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center space-x-2">
+        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+        <span class="text-xs font-bold uppercase tracking-wider text-gray-100">Оперативна стрічка</span>
+      </div>
+      <span id="feed-count-badge" class="text-[11px] text-gray-400 font-mono">0 подій</span>
+    </div>
+
+    <!-- Список поточних загроз -->
+    <div id="alerts-feed" class="flex-1 overflow-y-auto p-3 space-y-2">
+      <!-- Заглушка відсутності загроз -->
+      <div id="no-alerts-placeholder" class="text-center py-16 text-gray-400">
+        <div class="w-10 h-10 mx-auto mb-2 text-emerald-400/60 flex items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20">
+          ✓
+        </div>
+        <p class="text-sm font-semibold text-gray-200">Повітряний простір чистий</p>
+        <p class="text-xs text-gray-400 mt-1">Активних загроз у вибраному секторі немає</p>
+      </div>
+    </div>
+
+    <!-- Кнопка швидкої симуляції повідомлення -->
+    <div class="p-2.5 border-t border-white/10 bg-black/20 flex-shrink-0">
+      <button id="btn-open-simulate-modal" class="w-full py-2 px-3 bg-white/10 hover:bg-white/15 text-gray-200 text-xs rounded-lg border border-white/15 font-medium transition-all flex items-center justify-center gap-1.5">
+        <span class="text-blue-400">⚡</span>
+        Змоделювати повідомлення (Тест)
+      </button>
+    </div>
+  </aside>
+
+  <!-- ========================================================
+       МОДАЛЬНЕ ВІКНО "НАЛАШТУВАННЯ СПОВІЩЕНЬ" (LIQUID GLASS)
+  ======================================================== -->
+  <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="liquid-glass rounded-2xl max-w-md w-full p-5 border border-white/20 shadow-2xl relative">
+      
+      <!-- Шапка модалки -->
+      <div class="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+        <div class="flex items-center space-x-2">
+          <span class="text-lg">⚙️</span>
+          <h3 class="text-sm font-bold uppercase tracking-wider text-white">Налаштування сповіщень</h3>
+        </div>
+        <button id="btn-close-settings" class="text-gray-400 hover:text-white text-lg leading-none p-1">✕</button>
+      </div>
+
+      <!-- Тіло налаштувань -->
+      <div class="space-y-4 text-xs">
+        
+        <!-- Тогл 1: Звук сирени -->
+        <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div>
+            <p class="font-semibold text-gray-200">Звук сирени</p>
+            <p class="text-[11px] text-gray-400">Програвати звуковий сигнал при появі нової загрози</p>
+          </div>
+          <input id="setting-sound" type="checkbox" class="w-4 h-4 accent-blue-500 rounded cursor-pointer">
+        </label>
+
+        <!-- Тогл 2: Браузерні Push-сповіщення -->
+        <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div>
+            <p class="font-semibold text-gray-200">Браузерні Push-сповіщення</p>
+            <p class="text-[11px] text-gray-400">Спливаючі системні вікна навіть якщо вкладка неактивна</p>
+          </div>
+          <input id="setting-push" type="checkbox" class="w-4 h-4 accent-blue-500 rounded cursor-pointer">
+        </label>
+
+        <!-- Фільтр 1: Сповіщати тільки для мого регіону -->
+        <div class="p-2.5 rounded-lg bg-white/5 border border-white/10 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-gray-200">Мій домашній регіон</span>
+            <span class="text-[10px] text-blue-400">Фільтрація тривог</span>
+          </div>
+          <select id="setting-user-region" class="w-full bg-black/60 border border-white/15 text-gray-200 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-blue-400">
+            <option value="all">Усі регіони (без обмежень)</option>
+            <option value="Вінницька область">Вінницька область</option>
+            <option value="Київська область">Київська область / м. Київ</option>
+            <option value="Харківська область">Харківська область</option>
+            <option value="Дніпропетровська область">Дніпропетровська область</option>
+            <option value="Одеська область">Одеська область</option>
+            <option value="Львівська область">Львівська область</option>
+            <option value="Запорізька область">Запорізька область</option>
+            <option value="Миколаївська область">Миколаївська область</option>
+            <option value="Полтавська область">Полтавська область</option>
+            <option value="Черкаська область">Черкаська область</option>
+            <option value="Житомирська область">Житомирська область</option>
+            <option value="Сумська область">Сумська область</option>
+            <option value="Чернігівська область">Чернігівська область</option>
+            <option value="Хмельницька область">Хмельницька область</option>
+            <option value="Рівненська область">Рівненська область</option>
+            <option value="Волинська область">Волинська область</option>
+            <option value="Івано-Франківська область">Івано-Франківська область</option>
+            <option value="Тернопільська область">Тернопільська область</option>
+            <option value="Закарпатська область">Закарпатська область</option>
+            <option value="Чернівецька область">Чернівецька область</option>
+            <option value="Кіровоградська область">Кіровоградська область</option>
+            <option value="Херсонська область">Херсонська область</option>
+            <option value="Донецька область">Донецька область</option>
+            <option value="Луганська область">Луганська область</option>
+            <option value="Автономна Республіка Крим">АР Крим</option>
+          </select>
+        </div>
+
+        <!-- Фільтр 2: Типи загроз для сповіщень (чекбокси) -->
+        <div class="p-2.5 rounded-lg bg-white/5 border border-white/10 space-y-2">
+          <p class="font-semibold text-gray-200">Типи загроз для сповіщень:</p>
+          <div class="grid grid-cols-2 gap-2 text-[11px]">
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" id="notify-bpla" checked class="w-3.5 h-3.5 accent-blue-500 rounded">
+              <span>Ударні БПЛА</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" id="notify-missile" checked class="w-3.5 h-3.5 accent-blue-500 rounded">
+              <span>Ракети (КР/Бал)</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" id="notify-avia" checked class="w-3.5 h-3.5 accent-blue-500 rounded">
+              <span>Авіація</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" id="notify-recon" checked class="w-3.5 h-3.5 accent-blue-500 rounded">
+              <span>Розвідка</span>
+            </label>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Кнопка збереження -->
+      <div class="mt-5 flex justify-end">
+        <button id="btn-save-settings" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg transition-all">
+          Зберегти налаштування
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       МОДАЛЬНЕ ВІКНО СИМУЛЯЦІЇ (ТЕСТ)
+  ======================================================== -->
+  <div id="simulate-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="liquid-glass rounded-2xl max-w-md w-full p-4 border border-white/20 shadow-2xl">
+      <div class="flex items-center justify-between pb-2 border-b border-white/10 mb-3">
+        <h3 class="text-xs font-bold uppercase tracking-wider text-white">Змоделювати ціль</h3>
+        <button id="btn-close-simulate" class="text-gray-400 hover:text-white">✕</button>
+      </div>
+      
+      <div class="space-y-2 mb-3">
+        <button data-type="bpla" data-region="Вінницька область" data-district="Жмеринський район" class="btn-sample-sim w-full text-left p-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs transition-colors">
+          🛸 <strong class="text-amber-400">БПЛА:</strong> Вінницька обл. (Жмеринський р-н)
+        </button>
+        <button data-type="ballistic" data-region="Київська область" data-district="Броварський район" class="btn-sample-sim w-full text-left p-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs transition-colors">
+          🚀 <strong class="text-red-400">Балістика:</strong> Київська обл. (Броварський р-н)
+        </button>
+        <button data-type="recon" data-region="Одеська область" data-district="Білгород-Дністровський" class="btn-sample-sim w-full text-left p-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs transition-colors">
+          🛰️ <strong class="text-purple-400">Розвідка:</strong> Одеська обл. (Білгород-Дністровський)
+        </button>
+      </div>
+
+      <div class="flex justify-end">
+        <button id="btn-cancel-simulate" class="px-3 py-1.5 text-xs text-gray-400 hover:text-white mr-2">Закрити</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet & Socket.io JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Головний синхронізований модуль клієнта -->
+  <script src="app.js"></script>
+</body>
+</html>

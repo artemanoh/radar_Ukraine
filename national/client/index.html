@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AirRadar // National Surveillance System</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- TOP HEADER BAR (full width, 40px height) -->
+  <header id="topbar">
+    <div class="topbar-left">
+      <!-- Logo: monospace text, no icons -->
+      <span class="system-id">AIRRADAR//NSS</span>
+      <span class="system-version">v2.0.1</span>
+      <span class="separator">|</span>
+      <!-- Connection status -->
+      <span id="conn-dot" class="status-dot"></span>
+      <span id="conn-label">ВІДКЛЮЧЕНО</span>
+    </div>
+    <div class="topbar-center">
+      <!-- Live system clock -->
+      <span class="clock-label">UTC+3</span>
+      <span id="system-clock">--:--:--</span>
+      <span class="separator">|</span>
+      TARGETS: <span id="target-count" class="data-value">0</span>
+      <span class="separator">|</span>
+      ALARMS: <span id="alarm-count" class="data-value alarm-count-value">0</span>
+    </div>
+    <div class="topbar-right">
+      <!-- Ping/latency display -->
+      LAT: <span id="latency-display" class="data-value">---</span> ms
+      <span class="separator">|</span>
+      SEQ: <span id="seq-display" class="data-value">0</span>
+    </div>
+  </header>
+
+  <!-- MAIN AREA -->
+  <div id="main-area">
+
+    <!-- LEFT SIDEBAR (command panel) -->
+    <aside id="sidebar">
+
+      <!-- SECTION: Filter by target type -->
+      <section class="sidebar-section">
+        <div class="section-title">ФІЛЬТР ЗАГРОЗ</div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="filter-uav" checked>
+            <span class="checkbox-custom"></span>
+            <span class="target-type uav">▲ БпЛА</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="filter-cruise" checked>
+            <span class="checkbox-custom"></span>
+            <span class="target-type cruise">➤ КРИЛАТА РАКЕТА</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="filter-ballistic" checked>
+            <span class="checkbox-custom"></span>
+            <span class="target-type ballistic">⬆ БАЛІСТИКА</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="filter-aircraft" checked>
+            <span class="checkbox-custom"></span>
+            <span class="target-type aircraft">✈ АВІАЦІЯ</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- SECTION: Map Layers -->
+      <section class="sidebar-section">
+        <div class="section-title">ШАРИ КАРТИ</div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="layer-oblasts" checked>
+            <span class="checkbox-custom"></span>
+            <span>МЕЖІ ОБЛАСТЕЙ</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="layer-grid">
+            <span class="checkbox-custom"></span>
+            <span>КООРДИНАТНА СІТКА</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="layer-tracks" checked>
+            <span class="checkbox-custom"></span>
+            <span>ТРАЄКТОРІЇ ЦІЛЕЙ</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- SECTION: Range Rings -->
+      <section class="sidebar-section">
+        <div class="section-title">КІЛЬЦЯ ДАЛЬНОСТІ</div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ring-20">
+            <span class="checkbox-custom"></span>
+            <span>20 км</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ring-50">
+            <span class="checkbox-custom"></span>
+            <span>50 км</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ring-100">
+            <span class="checkbox-custom"></span>
+            <span>100 км</span>
+          </label>
+        </div>
+        <!-- Center of rings selector -->
+        <div class="control-row">
+          <span class="ctrl-label">ЦЕНТР:</span>
+          <select id="ring-center">
+            <option value="ukraine">Центр України</option>
+            <option value="kyiv">Київ</option>
+            <option value="kharkiv">Харків</option>
+            <option value="odessa">Одеса</option>
+            <option value="dnipro">Дніпро</option>
+            <option value="vinnytsia">Вінниця</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- SECTION: Audio Alerts -->
+      <section class="sidebar-section">
+        <div class="section-title">АУДІО СПОВІЩЕННЯ</div>
+        <div class="filter-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="audio-enabled">
+            <span class="checkbox-custom"></span>
+            <span>ЗВУКОВІ ТРИВОГИ</span>
+          </label>
+        </div>
+        <div class="control-row">
+          <span class="ctrl-label">ГУЧНІСТЬ</span>
+          <input type="range" id="audio-volume" min="0" max="1" step="0.05" value="0.7">
+          <span id="audio-vol-display" class="data-value">70%</span>
+        </div>
+        <div class="control-row">
+          <span class="ctrl-label">ТРИГЕР ЗА</span>
+          <input type="range" id="alert-trigger-km" min="10" max="300" step="10" value="100">
+          <span id="alert-km-display" class="data-value">100 км</span>
+        </div>
+      </section>
+
+      <!-- SECTION: Active Alarms List -->
+      <section class="sidebar-section" id="alarms-section">
+        <div class="section-title">АКТИВНІ ТРИВОГИ <span id="alarm-badge"></span></div>
+        <div id="alarms-list">
+          <div class="no-data-msg">Тривог немає</div>
+        </div>
+      </section>
+
+      <!-- SECTION: Monitored regions -->
+      <section class="sidebar-section">
+        <div class="section-title">ЗОНА МОНІТОРИНГУ</div>
+        <div id="monitored-zone-info" class="zone-info-box">
+          <span class="text-dim">Клікніть на область на карті</span>
+        </div>
+        <button id="btn-clear-zone" class="btn-secondary" style="display:none">✕ СКАСУВАТИ ВИБІР</button>
+      </section>
+
+      <!-- WebSocket URL -->
+      <section class="sidebar-section">
+        <div class="section-title">З'ЄДНАННЯ</div>
+        <div class="control-row">
+          <input type="text" id="ws-url-input" value="ws://localhost:8091" style="flex:1">
+          <button id="btn-reconnect" class="btn-primary">ПІДКЛ.</button>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- MAP AREA -->
+    <div id="map-wrapper">
+      <div id="map"></div>
+      <!-- Grid canvas overlay -->
+      <canvas id="grid-canvas"></canvas>
+      <!-- Target telemetry panel (shown on click) -->
+      <div id="telemetry-panel" class="hidden">
+        <div class="telem-header">
+          <span id="telem-callsign">---</span>
+          <span id="telem-type" class="telem-type-badge">---</span>
+          <button id="telem-close" class="telem-close-btn">✕</button>
+        </div>
+        <div class="telem-grid">
+          <div class="telem-row">
+            <span class="telem-label">ТИП</span>
+            <span id="telem-type-full" class="telem-val">---</span>
+          </div>
+          <div class="telem-row">
+            <span class="telem-label">ШВИДКІСТЬ</span>
+            <span id="telem-speed" class="telem-val">--- КМ/Г</span>
+          </div>
+          <div class="telem-row">
+            <span class="telem-label">ВИСОТА</span>
+            <span id="telem-alt" class="telem-val">--- М</span>
+          </div>
+          <div class="telem-row">
+            <span class="telem-label">АЗИМУТ</span>
+            <span id="telem-azimuth" class="telem-val">---°</span>
+          </div>
+          <div class="telem-row">
+            <span class="telem-label">КООРДИНАТИ</span>
+            <span id="telem-coords" class="telem-val">--, --</span>
+          </div>
+          <div class="telem-row">
+            <span class="telem-label">ОБЛАСТЬ</span>
+            <span id="telem-oblast" class="telem-val">---</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

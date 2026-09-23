@@ -1,0 +1,94 @@
+version: "3.9"
+
+# ============================================================
+# AirRadar Zero-Latency — Docker Compose Stack
+# ============================================================
+# Services:
+#   math_engine  — C++17 → WASM build artifact (build only)
+#   gateway      — Go WebSocket hub (port 8080)
+#   client       — React PWA via Nginx (port 3000)
+#
+# Usage:
+#   docker compose up --build
+#   Open http://localhost:3000
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # math_engine: C++ → WASM build stage
+  # Produces /dist/math_engine.{js,wasm} consumed by client
+  # ----------------------------------------------------------
+  math_engine:
+    build:
+      context: ./math_engine
+      dockerfile: Dockerfile
+      target: wasm-export
+    volumes:
+      # Mount compiled WASM artifacts into the client's public dir
+      - wasm_dist:/wasm_dist
+    # This service exits after build — that's intentional.
+    # The client picks up artifacts from the shared volume.
+
+  # ----------------------------------------------------------
+  # gateway: Go WebSocket broadcast hub
+  # Streams mock UAV targets to all connected clients
+  # ----------------------------------------------------------
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - LOG_LEVEL=info
+      - NUM_TARGETS=30
+      - UPDATE_INTERVAL_MS=100
+      - GATEWAY_PORT=8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - airradar
+
+  # ----------------------------------------------------------
+  # client: React PWA (Vite build → Nginx)
+  # Serves the frontend and proxies /ws to the gateway
+  # ----------------------------------------------------------
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      # Inject compiled WASM into Nginx's static dir
+      - wasm_dist:/usr/share/nginx/html/wasm:ro
+    depends_on:
+      math_engine:
+        condition: service_completed_successfully
+      gateway:
+        condition: service_healthy
+    environment:
+      - VITE_GATEWAY_WS_URL=ws://localhost:8080/ws
+    networks:
+      - airradar
+    restart: unless-stopped
+
+# ----------------------------------------------------------
+# Volumes
+# ----------------------------------------------------------
+volumes:
+  wasm_dist:
+    driver: local
+
+# ----------------------------------------------------------
+# Networks
+# ----------------------------------------------------------
+networks:
+  airradar:
+    driver: bridge

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Ballistic missile body -->
+  <polygon points="24,2 29,14 27,38 21,38 19,14" fill="#1e293b" stroke="#c084fc" stroke-width="2.2" stroke-linejoin="round"/>
+  <!-- Stabilizing delta fins -->
+  <polygon points="19,32 10,40 19,38" fill="#c084fc"/>
+  <polygon points="29,32 38,40 29,38" fill="#c084fc"/>
+  <!-- Hypersonic plume -->
+  <polygon points="22,39 24,46 26,39" fill="#f43f5e"/>
+  <!-- Hypersonic centerline -->
+  <line x1="24" y1="6" x2="24" y2="34" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+</svg>

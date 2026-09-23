@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Delta wing silhouette (Shahed / Strike UAV) -->
+  <polygon points="24,4 44,40 24,32 4,40" fill="#1e293b" stroke="#f59e0b" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Wingtip stabilization fins -->
+  <line x1="4" y1="40" x2="4" y2="30" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="44" y1="40" x2="44" y2="30" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Central fuselage stripe -->
+  <line x1="24" y1="8" x2="24" y2="30" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Engine propulsion core -->
+  <circle cx="24" cy="22" r="3" fill="#f59e0b"/>
+</svg>

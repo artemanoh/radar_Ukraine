@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Wide surveillance wings -->
+  <path d="M4,18 L24,14 L44,18 L44,22 L24,19 L4,22 Z" fill="#38bdf8" stroke="#0284c7" stroke-width="1.5"/>
+  <!-- Central fuselage -->
+  <ellipse cx="24" cy="18" rx="4" ry="12" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+  <!-- Twin tail booms -->
+  <line x1="18" y1="20" x2="18" y2="36" stroke="#38bdf8" stroke-width="1.8"/>
+  <line x1="30" y1="20" x2="30" y2="36" stroke="#38bdf8" stroke-width="1.8"/>
+  <!-- Tail horizontal stabilizer -->
+  <line x1="16" y1="36" x2="32" y2="36" stroke="#38bdf8" stroke-width="2"/>
+  <!-- Surveillance optical lens -->
+  <circle cx="24" cy="10" r="3" fill="#ffffff" stroke="#38bdf8" stroke-width="1.5"/>
+  <circle cx="24" cy="10" r="1.2" fill="#0284c7"/>
+</svg>

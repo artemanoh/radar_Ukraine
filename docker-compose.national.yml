@@ -1,0 +1,33 @@
+version: "3.9"
+
+# ============================================================
+# AirRadar National Surveillance System — Docker Compose
+# ============================================================
+# One service: Node.js server that serves both:
+#   - HTTP (static frontend files) on port 8091
+#   - WebSocket (real-time radar data) on port 8091
+# Usage:
+#   docker compose -f docker-compose.national.yml up --build
+#   Open http://localhost:8091
+# ============================================================
+
+services:
+  national-server:
+    build:
+      context: ./national/server
+      dockerfile: Dockerfile
+    ports:
+      - "8091:8091"
+    volumes:
+      # Mount frontend files so server can serve them as static files
+      - ./national/client:/app/../client:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=8091
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 8s
+    restart: unless-stopped

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AirRadar Zero-Latency</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- RAIN CANVAS -->
+<canvas id="rain-canvas"></canvas>
+
+<!-- SCANLINE OVERLAY -->
+<div id="scanline"></div>
+
+<!-- HEADER -->
+<header id="app-header">
+  <div class="logo-container" style="display: flex; align-items: center; gap: 10px;">
+    <svg width="24" height="24" viewBox="0 0 24 24" style="animation: spin-slow 10s linear infinite;">
+      <circle cx="12" cy="12" r="10" fill="none" stroke="var(--clr-blue)" stroke-width="2"/>
+      <path d="M12 12 L12 2 A10 10 0 0 1 22 12 Z" fill="var(--clr-blue-dim)" stroke="var(--clr-blue)"/>
+      <circle cx="12" cy="12" r="2" fill="var(--clr-blue)"/>
+    </svg>
+    <div style="display: flex; flex-direction: column;">
+      <span class="logo-text">AIR//RADAR</span>
+      <span style="font-size: 0.5rem; color: var(--text-secondary); letter-spacing: 0.2em;">ZERO-LATENCY</span>
+    </div>
+  </div>
+
+  <div class="status-container" style="display: flex; align-items: center; gap: 20px;">
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <span id="ws-dot" class="status-dot disconnected" style="width: 8px; height: 8px; border-radius: 50%; background: var(--clr-red);"></span>
+      <span id="ws-status" style="font-size: 0.7rem; color: var(--text-secondary);">ВІДКЛЮЧЕНО</span>
+    </div>
+    <div style="font-size: 0.7rem; color: var(--text-secondary);">
+      ЦІЛІ: <span id="target-count" style="color: var(--clr-red); font-weight: bold;">0</span>
+    </div>
+    <div id="system-time" style="font-size: 0.7rem; color: var(--clr-blue);">00:00:00 UTC+3</div>
+    <button id="btn-alert">🔔 ТРИВОГА</button>
+  </div>
+</header>
+
+<!-- MAIN LAYOUT -->
+<main id="app-main">
+
+  <!-- MAP CONTAINER -->
+  <div id="map-container">
+    <div id="map"></div>
+    <canvas id="heatmap-canvas"></canvas>
+    <canvas id="grid-canvas"></canvas>
+  </div>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <button id="sidebar-toggle" aria-label="Toggle sidebar">&#x2039;</button>
+    
+    <nav id="tab-nav">
+      <button class="tab-btn active" data-tab="visuals">🗺️ <span>Карта</span></button>
+      <button class="tab-btn" data-tab="targets">🎯 <span>Цілі</span></button>
+      <button class="tab-btn" data-tab="zones">🛡️ <span>Зони</span></button>
+      <button class="tab-btn" data-tab="audio">🔊 <span>Аудіо</span></button>
+      <button class="tab-btn" data-tab="system">⚙️ <span>Система</span></button>
+    </nav>
+
+    <!-- TAB 1: VISUALS -->
+    <div class="tab-panel active" id="tab-visuals">
+      <div class="section-header">Візуалізація та Карта</div>
+      
+      <div class="control-row">
+        <label>Прозорість карти</label>
+        <input type="range" id="ctrl-map-opacity" min="0.2" max="1" step="0.01" value="1">
+        <span class="ctrl-value">1</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Тактична сітка</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-grid">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Інтенсивність сітки</label>
+        <input type="range" id="ctrl-grid-intensity" min="0.1" max="1" step="0.05" value="0.4">
+        <span class="ctrl-value">0.4</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Радарний дощ 🌧️</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-weather">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Дощ на інтерфейсі</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-rain-effect">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Теплова карта</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-heatmap">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Назви населених пунктів</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-place-names" checked>
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Розмір шрифту</label>
+        <select id="ctrl-font-size">
+          <option value="small">Малий</option>
+          <option value="medium" selected>Середній</option>
+          <option value="large">Великий</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- TAB 2: TARGETS -->
+    <div class="tab-panel" id="tab-targets">
+      <div class="section-header">Відображення Цілей</div>
+      
+      <div class="control-row">
+        <label>Стиль іконок</label>
+        <div class="radio-group">
+          <label class="radio-option">
+            <input type="radio" name="icon-style" value="minimal" checked>
+            <span class="radio-label">Мінімалізм</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="icon-style" value="detailed">
+            <span class="radio-label">SVG Деталь</span>
+          </label>
+        </div>
+      </div>
+      
+      <div class="control-row">
+        <label>Масштаб БпЛА</label>
+        <input type="range" id="ctrl-uav-scale" min="0.5" max="3" step="0.1" value="1">
+        <span class="ctrl-value">1</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Масштаб Ракет</label>
+        <input type="range" id="ctrl-missile-scale" min="0.5" max="3" step="0.1" value="1">
+        <span class="ctrl-value">1</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Інтенсивність свічення</label>
+        <input type="range" id="ctrl-glow" min="0" max="1" step="0.05" value="0.6">
+        <span class="ctrl-value">0.6</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Довжина хвоста</label>
+        <input type="range" id="ctrl-tail-length" min="0" max="100" step="1" value="40" data-unit="%">
+        <span class="ctrl-value">40%</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Плавність (Lerp)</label>
+        <input type="range" id="ctrl-lerp" min="0.01" max="0.3" step="0.01" value="0.08">
+        <span class="ctrl-value">0.08</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Підписи цілей</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-labels" checked>
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Конус ймовірності</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-cone" checked>
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- TAB 3: ZONES -->
+    <div class="tab-panel" id="tab-zones">
+      <div class="section-header">Зони Безпеки та ППО</div>
+      
+      <div class="control-row">
+        <label>Радіус зони безпеки</label>
+        <input type="range" id="ctrl-zone-radius" min="10" max="200" step="5" value="80" data-unit="km">
+        <span class="ctrl-value">80km</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Колір зони</label>
+        <div class="color-swatches">
+          <div class="color-swatch" data-color="#7c3aed" style="background: #7c3aed;"></div>
+          <div class="color-swatch" data-color="#00d4ff" style="background: #00d4ff;"></div>
+          <div class="color-swatch" data-color="#ef4444" style="background: #ef4444;"></div>
+        </div>
+      </div>
+      
+      <div class="control-row">
+        <label>Прозорість зони</label>
+        <input type="range" id="ctrl-zone-opacity" min="0.05" max="0.6" step="0.01" value="0.15">
+        <span class="ctrl-value">0.15</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Пульсація при загрозі</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-zone-pulse" checked>
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Попередження за X км</label>
+        <input type="range" id="ctrl-alert-distance" min="10" max="150" step="5" value="50" data-unit="km">
+        <span class="ctrl-value">50km</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Зони ППО</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-ppo-zones">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- TAB 4: AUDIO -->
+    <div class="tab-panel" id="tab-audio">
+      <div class="section-header">Аудіо-відгук</div>
+      
+      <div class="control-row">
+        <label>Майстер-гучність</label>
+        <input type="range" id="ctrl-master-vol" min="0" max="1" step="0.01" value="0.7">
+        <span class="ctrl-value">0.7</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Гучність UI кліків</label>
+        <input type="range" id="ctrl-ui-vol" min="0" max="1" step="0.01" value="0.5">
+        <span class="ctrl-value">0.5</span>
+      </div>
+      
+      <div class="control-row">
+        <label>Тон сирени</label>
+        <select id="ctrl-siren-type">
+          <option value="classic" selected>Класична</option>
+          <option value="pulse">Цифровий імпульс</option>
+          <option value="lofi">Lofi Synth</option>
+        </select>
+      </div>
+      
+      <div class="control-row">
+        <label>Просторове аудіо</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-spatial-audio">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Фоновий амбієнт</label>
+        <label class="toggle">
+          <input type="checkbox" id="ctrl-ambient">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      
+      <div class="control-row">
+        <label>Гучність амбієнту</label>
+        <input type="range" id="ctrl-ambient-vol" min="0" max="1" step="0.01" value="0.3">
+        <span class="ctrl-value">0.3</span>
+      </div>
+    </div>
+
+    <!-- TAB 5: SYSTEM -->
+    <div class="tab-panel" id="tab-system">
+      <div id="config-preview-section">
+        <div class="section-header">Поточний стан системи</div>
+        <pre id="config-preview"></pre>
+      </div>
+      
+      <button class="btn-action" id="btn-swarm">⚡ Запустити рій (10 цілей)</button>
+      
+      <div class="control-row">
+        <label>Blur ефект панелей</label>
+        <input type="range" id="ctrl-panel-blur" min="0" max="40" step="1" value="20" data-unit="px">
+        <span class="ctrl-value">20px</span>
+      </div>
+      
+      <button class="btn-action btn-danger" id="btn-reset">↺ Скинути налаштування</button>
+      
+      <div class="control-row" style="margin-top: 20px;">
+        <label style="flex: 0 0 auto;">WS URL</label>
+        <input type="text" id="ws-url" value="ws://localhost:8080/ws" style="flex: 1; min-width: 0;" />
+      </div>
+      <button class="btn-action" id="btn-connect">🔌 Підключитися</button>
+    </div>
+
+  </aside>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="app.js" defer></script>
+</body>
+</html>
