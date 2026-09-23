@@ -150,23 +150,23 @@
       </div>
     </div>
 
-    <!-- Вкладки навігації (Вимога: Карта | Тривоги | Сповіщення | ШІ | Налаштування) -->
-    <nav class="flex items-center space-x-1 bg-black/50 p-1 rounded-xl border border-white/10" id="main-nav-tabs" role="tablist">
-      <button id="tab-btn-map" role="tab" aria-selected="true" class="nav-tab active px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all bg-sky-600 text-white shadow">
+    <!-- Вкладки навігації (горизонтально гортані: Карта | Тривоги | Сповіщення | ШІ | Налаштування) -->
+    <nav class="flex items-center space-x-1 bg-black/50 p-1 rounded-xl border border-white/10 overflow-x-auto whitespace-nowrap scrollbar-none scroll-touch scroll-smooth max-w-[50vw] sm:max-w-none" id="main-nav-tabs" role="tablist">
+      <button id="tab-btn-map" role="tab" aria-selected="true" class="nav-tab active flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all bg-sky-600 text-white shadow">
         <span>🗺️</span> <span>Карта</span>
       </button>
-      <button id="tab-btn-alerts" role="tab" aria-selected="false" class="nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка Офіційні тривоги">
+      <button id="tab-btn-alerts" role="tab" aria-selected="false" class="nav-tab flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка Офіційні тривоги">
         <span>🚨</span> <span>Тривоги</span>
         <span id="nav-alerts-badge" class="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-red-600 text-white font-bold leading-tight hidden">0</span>
       </button>
-      <button id="tab-btn-telegram" role="tab" aria-selected="false" class="nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка Сповіщення">
+      <button id="tab-btn-telegram" role="tab" aria-selected="false" class="nav-tab flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка Сповіщення">
         <span>🔔</span> <span>Сповіщення</span>
         <span id="tab-telegram-badge" class="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-sky-500/30 text-sky-300 border border-sky-400/40 font-bold hidden">0</span>
       </button>
-      <button id="tab-btn-ai" role="tab" aria-selected="false" class="nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка ШІ">
+      <button id="tab-btn-ai" role="tab" aria-selected="false" class="nav-tab flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all relative" aria-label="Вкладка ШІ">
         <span>🧠</span> <span>ШІ</span>
       </button>
-      <button id="tab-btn-settings" role="tab" aria-selected="false" class="nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all">
+      <button id="tab-btn-settings" role="tab" aria-selected="false" class="nav-tab flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1.5 transition-all">
         <span>⚙️</span> <span>Налаштування</span>
       </button>
     </nav>
@@ -476,22 +476,22 @@
           <span id="tg-llm-badge-text">LLM: Локальний NLP</span>
         </div>
 
-        <!-- Перемикач фільтрів подій (Section 53) -->
+        <!-- Перемикач фільтрів подій (Всі / Загрози / Повідомлення / Мої регіони / ШІ) -->
         <div class="flex flex-wrap items-center bg-black/50 p-1 rounded-lg border border-white/15 text-xs font-mono gap-1">
           <button id="tg-btn-filter-all" class="tg-filter-btn active px-2.5 py-1 rounded font-semibold bg-sky-600 text-white transition-colors" aria-label="Всі сповіщення">
             Всі (<span id="tg-count-all">0</span>)
           </button>
-          <button id="tg-btn-filter-alerts" class="tg-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" aria-label="Офіційні тривоги">
-            🔴 Тривоги (<span id="tg-count-alerts">0</span>)
-          </button>
           <button id="tg-btn-filter-threats" class="tg-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" aria-label="Повітряні загрози">
             🟠 Загрози (<span id="tg-count-threats">0</span>)
           </button>
-          <button id="tg-btn-filter-messages" class="tg-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" aria-label="Повідомлення Telegram">
-            📰 Telegram (<span id="tg-count-messages">0</span>)
+          <button id="tg-btn-filter-messages" class="tg-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" aria-label="Повідомлення моніторингу">
+            💬 Повідомлення (<span id="tg-count-messages">0</span>)
           </button>
           <button id="tg-btn-filter-followed" class="tg-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" aria-label="Обрані території">
             ⭐ Мої території (<span id="tg-count-followed">0</span>)
+          </button>
+          <button id="tg-btn-filter-ai" class="tg-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors" aria-label="ШІ-висновки">
+            🧠 ШІ-аналіз (<span id="tg-count-ai">0</span>)
           </button>
         </div>
 
@@ -521,166 +521,181 @@
   ======================================================== -->
   <main id="view-ai" class="hidden absolute top-18 left-2 right-2 bottom-8 liquid-glass rounded-2xl z-30 p-3 sm:p-5 flex flex-col border border-purple-500/30 shadow-2xl backdrop-blur-xl overflow-hidden">
     
-    <!-- Шапка вкладки ШІ -->
-    <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pb-3 border-b border-white/10 mb-3 flex-shrink-0">
-      <div>
-        <div class="flex items-center gap-2">
-          <span class="text-xl">🧠</span>
-          <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Оперативно-тактичний аналіз загроз (ШІ)</h2>
-          <span id="ai-engine-status-tag" class="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-400/30 font-bold">NLP ONLINE</span>
+    <!-- 1. Стан коли ШІ ВИМКНЕНО (за замовчуванням) -->
+    <div id="ai-disabled-container" class="flex-1 flex flex-col items-center justify-center p-4 text-center">
+      <div class="max-w-md w-full p-6 sm:p-8 rounded-2xl bg-black/60 border border-purple-500/30 text-center space-y-4 shadow-2xl backdrop-blur-xl">
+        <div class="w-16 h-16 mx-auto rounded-full bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-3xl">
+          🧠
         </div>
-        <p class="text-[11px] text-gray-400 mt-0.5">Структурування повідомлень, визначення типів озброєння, напрямків польоту та прихованих загроз.</p>
-      </div>
-
-      <!-- Статистичні лічильники ШІ -->
-      <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
-        <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-purple-500/30 flex items-center gap-1.5">
-          <span class="text-purple-400 font-semibold">ОБРОБЛЕНО:</span>
-          <span id="ai-stat-analyzed" class="text-white font-bold">0</span>
+        <div>
+          <h3 class="text-base sm:text-lg font-bold text-white uppercase tracking-wider">ШІ вимкнено</h3>
+          <p class="text-xs text-gray-300 mt-2 leading-relaxed">
+            Увімкніть ШІ в Налаштуваннях, щоб аналізувати інформаційні повідомлення, визначати згадані населені пункти та структурувати оперативну обстановку.
+          </p>
         </div>
-        <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-red-500/30 flex items-center gap-1.5">
-          <span class="text-red-400 font-semibold">ЗАГРОЗ:</span>
-          <span id="ai-stat-threats" class="text-red-300 font-bold">0</span>
-        </div>
-        <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-sky-500/30 flex items-center gap-1.5">
-          <span class="text-sky-400 font-semibold">ТОЧНІСТЬ:</span>
-          <span id="ai-stat-confidence" class="text-sky-300 font-bold">94%</span>
-        </div>
+        <button id="btn-ai-open-settings" class="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-all shadow-lg shadow-purple-900/40 flex items-center justify-center gap-2 mx-auto">
+          <span>⚙️</span> <span>Відкрити налаштування</span>
+        </button>
       </div>
     </div>
 
-    <!-- Основна сітка: Ліворуч - Стан рушія та тест, Праворуч - Тактична стрічка -->
-    <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden">
-      
-      <!-- Ліва колонка: Стан рушія, Налаштування та Тестовий аналізатор -->
-      <div class="lg:col-span-4 flex flex-col space-y-3 overflow-y-auto pr-1">
+    <!-- 2. Стан коли ШІ УВІМКНЕНО -->
+    <div id="ai-enabled-container" class="hidden flex-1 flex flex-col overflow-hidden">
+      <!-- Шапка вкладки ШІ -->
+      <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pb-3 border-b border-white/10 mb-3 flex-shrink-0">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🧠</span>
+            <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Оперативно-тактичний аналіз (ШІ)</h2>
+            <span id="ai-engine-status-tag" class="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-400/30 font-bold">● АКТИВНИЙ</span>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-0.5">Структурування повідомлень, визначення типів озброєння, населених пунктів та категорій інформації.</p>
+        </div>
+
+        <!-- Статистичні лічильники ШІ -->
+        <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+          <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-purple-500/30 flex items-center gap-1.5">
+            <span class="text-purple-400 font-semibold">ОБРОБЛЕНО:</span>
+            <span id="ai-stat-analyzed" class="text-white font-bold">0</span>
+          </div>
+          <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-red-500/30 flex items-center gap-1.5">
+            <span class="text-red-400 font-semibold">ЗАГРОЗ:</span>
+            <span id="ai-stat-threats" class="text-red-300 font-bold">0</span>
+          </div>
+          <div class="bg-black/50 px-2.5 py-1 rounded-lg border border-sky-500/30 flex items-center gap-1.5">
+            <span class="text-sky-400 font-semibold">ТОЧНІСТЬ:</span>
+            <span id="ai-stat-confidence" class="text-sky-300 font-bold">95%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Основна сітка: Ліворуч - Пояснення та тест, Праворуч - Тактична стрічка -->
+      <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden">
         
-        <!-- Картка стану LLM-провайдера -->
-        <div class="liquid-glass rounded-xl p-3 border border-white/10 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300">СТАН РУШІЯ ШІ</span>
-            <button id="btn-refresh-ai-status" class="text-[10px] text-sky-400 hover:text-sky-300 font-mono font-semibold" title="Оновити стан підключення">
-              🔄 Оновити
+        <!-- Ліва колонка: Що робить ШІ, Стан рушія та Тестовий аналізатор -->
+        <div class="lg:col-span-4 flex flex-col space-y-3 overflow-y-auto pr-1">
+          
+          <!-- Обов'язкова картка: Що саме робить ШІ (Вимога п.9) -->
+          <div class="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30 space-y-2">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
+              <span>ℹ️</span> <span>Що робить ШІ?</span>
+            </h4>
+            <ul class="text-[11px] text-gray-300 space-y-1 pl-4 list-disc marker:text-purple-400">
+              <li>аналізує інформаційні повідомлення;</li>
+              <li>визначає згадані області, райони та населені пункти;</li>
+              <li>визначає категорію повідомлення;</li>
+              <li>виділяє час, якщо він прямо вказаний у джерелі;</li>
+              <li>формує короткий зрозумілий підсумок.</li>
+            </ul>
+            <div class="p-2 rounded bg-black/50 border border-amber-500/30 text-[10px] text-amber-300/90 leading-tight">
+              ⚠️ <b>ШІ не створює офіційні тривоги</b> та не визначає координати, маршрути або майбутні удари. Офіційні дані NEPTUN завжди мають найвищий пріоритет.
+            </div>
+          </div>
+
+          <!-- Картка стану LLM-провайдера -->
+          <div class="liquid-glass rounded-xl p-3 border border-white/10 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300">СТАН РУШІЯ ШІ</span>
+              <button id="btn-refresh-ai-status" class="text-[10px] text-sky-400 hover:text-sky-300 font-mono font-semibold" title="Оновити стан підключення">
+                🔄 Оновити
+              </button>
+            </div>
+
+            <div class="p-2.5 rounded-lg bg-black/40 border border-white/10 space-y-1.5 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-gray-400">Провайдер:</span>
+                <span id="ai-provider-name" class="font-bold text-purple-300 font-mono">Gemini Free Tier (Flash-Lite)</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-gray-400">Затримка:</span>
+                <span id="ai-latency-val" class="font-mono text-emerald-400">&lt; 15 ms</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-gray-400">Кеш повідомлень:</span>
+                <span id="ai-cache-val" class="font-mono text-gray-200">0 записів</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Інтерактивний тест аналізатора -->
+          <div class="liquid-glass rounded-xl p-3 border border-white/10 space-y-2 flex-1 flex flex-col">
+            <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300">ІНТЕРАКТИВНИЙ ТЕСТ ШІ</span>
+            <textarea id="ai-test-input" rows="2" placeholder="Введіть текст оперативного повідомлення для перевірки розпізнавання..." class="w-full bg-black/60 border border-white/15 text-xs text-gray-100 rounded-lg p-2 outline-none focus:border-purple-400 font-sans resize-none">Вінницька область — 2х Shahed через Гайсинський район курсом на Тульчин!</textarea>
+            <button id="btn-run-ai-test" class="w-full py-1.5 px-3 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 shadow">
+              <span>⚡</span> Проаналізувати повідомлення
             </button>
+            
+            <div id="ai-test-output" class="hidden p-2.5 rounded-lg bg-black/50 border border-purple-500/30 text-xs font-mono space-y-1 max-h-48 overflow-y-auto"></div>
           </div>
 
-          <div class="p-2.5 rounded-lg bg-black/40 border border-white/10 space-y-1.5 text-xs">
-            <div class="flex items-center justify-between">
-              <span class="text-gray-400">Провайдер:</span>
-              <span id="ai-provider-name" class="font-bold text-purple-300 font-mono">Локальний евристичний NLP</span>
+        </div>
+
+        <!-- Права колонка: Оперативно-тактична стрічка висновків ШІ -->
+        <div class="lg:col-span-8 flex flex-col overflow-hidden">
+          
+          <!-- Панель фільтрів та пошуку висновків ШІ -->
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-white/10 flex-shrink-0">
+            <div class="flex items-center gap-1 text-xs font-mono">
+              <button id="ai-filter-all" class="ai-filter-btn active px-2.5 py-1 rounded font-semibold bg-purple-600 text-white transition-colors">
+                Всі аналізи (<span id="ai-count-all">0</span>)
+              </button>
+              <button id="ai-filter-threats" class="ai-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors">
+                🔴 Загрози (<span id="ai-count-threats">0</span>)
+              </button>
+              <button id="ai-filter-movements" class="ai-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors">
+                🟠 Курси (<span id="ai-count-movements">0</span>)
+              </button>
             </div>
-            <div class="flex items-center justify-between">
-              <span class="text-gray-400">Затримка аналізу:</span>
-              <span id="ai-latency-val" class="font-mono text-emerald-400">&lt; 15 ms</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-gray-400">Кеш аналізів:</span>
-              <span id="ai-cache-val" class="font-mono text-gray-200">0 записів</span>
+
+            <div class="relative w-48">
+              <input id="ai-input-search" type="text" placeholder="Пошук у висновках..." class="w-full bg-black/60 border border-white/15 text-xs text-gray-100 rounded-lg pl-2.5 pr-6 py-1 outline-none focus:border-purple-400">
+              <button id="ai-btn-clear-search" class="absolute right-2 top-1 text-gray-400 hover:text-white text-xs hidden">✕</button>
             </div>
           </div>
-          <p class="text-[10px] text-gray-400 leading-relaxed">
-            💡 Для активації моделі <b>Gemini 1.5 Flash</b> вкажіть <code class="text-sky-300 font-mono">GEMINI_API_KEY</code> у файлі <code class="text-sky-300 font-mono">.env</code>.
-          </p>
-        </div>
 
-        <!-- Картка налаштувань ШІ -->
-        <div class="liquid-glass rounded-xl p-3 border border-white/10 space-y-2">
-          <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300">ПАРАМЕТРИ ШІ-АНАЛІЗУ</span>
-          
-          <label class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/10 cursor-pointer hover:bg-black/50 transition-colors">
-            <span class="text-xs text-gray-200">Аналізувати потік у реальному часі</span>
-            <input id="ai-setting-active" type="checkbox" checked class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
-          </label>
+          <!-- Стрічка карток тактичного аналізу ШІ -->
+          <div id="ai-analysis-feed" class="flex-1 overflow-y-auto space-y-3 pr-1.5 pb-12" tabindex="0" aria-label="Стрічка тактичного аналізу ШІ">
+            <div id="ai-feed-empty" class="text-center py-20 text-gray-400">
+              <div class="w-12 h-12 mx-auto mb-2 text-purple-400/60 flex items-center justify-center rounded-full bg-purple-500/10 border border-purple-500/20 text-xl font-bold">
+                🧠
+              </div>
+              <p class="text-sm font-semibold text-gray-200">Очікування повідомлень для аналізу...</p>
+              <p class="text-xs text-gray-400 mt-1">Штучний інтелект аналізує вхідний потік у реальному часі</p>
+            </div>
+          </div>
 
-          <label class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/10 cursor-pointer hover:bg-black/50 transition-colors">
-            <span class="text-xs text-gray-200">Фокусуватися на обраній області</span>
-            <input id="ai-setting-region-focus" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
-
-          <label class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/10 cursor-pointer hover:bg-black/50 transition-colors">
-            <span class="text-xs text-gray-200">Звуковий сигнал при критичній загрозі</span>
-            <input id="ai-setting-sound" type="checkbox" checked class="w-4 h-4 accent-amber-500 rounded cursor-pointer">
-          </label>
-        </div>
-
-        <!-- Інтерактивний тест аналізатора -->
-        <div class="liquid-glass rounded-xl p-3 border border-white/10 space-y-2 flex-1 flex flex-col">
-          <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300">ІНТЕРАКТИВНИЙ ТЕСТ ШІ</span>
-          <textarea id="ai-test-input" rows="3" placeholder="Введіть текст оперативного повідомлення для перевірки розпізнавання..." class="w-full bg-black/60 border border-white/15 text-xs text-gray-100 rounded-lg p-2 outline-none focus:border-purple-400 font-sans resize-none">Вінницька область — 2х Shahed через Гайсинський район курсом на Тульчин!</textarea>
-          <button id="btn-run-ai-test" class="w-full py-1.5 px-3 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 shadow">
-            <span>⚡</span> Проаналізувати повідомлення
-          </button>
-          
-          <div id="ai-test-output" class="hidden p-2.5 rounded-lg bg-black/50 border border-purple-500/30 text-xs font-mono space-y-1 max-h-48 overflow-y-auto"></div>
         </div>
 
       </div>
-
-      <!-- Права колонка: Оперативно-тактична стрічка висновків ШІ -->
-      <div class="lg:col-span-8 flex flex-col overflow-hidden">
-        
-        <!-- Панель фільтрів та пошуку висновків ШІ -->
-        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-white/10 flex-shrink-0">
-          <div class="flex items-center gap-1 text-xs font-mono">
-            <button id="ai-filter-all" class="ai-filter-btn active px-2.5 py-1 rounded font-semibold bg-purple-600 text-white transition-colors">
-              Всі аналізи (<span id="ai-count-all">0</span>)
-            </button>
-            <button id="ai-filter-threats" class="ai-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors">
-              🔴 Загрози (<span id="ai-count-threats">0</span>)
-            </button>
-            <button id="ai-filter-movements" class="ai-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors">
-              🟠 Курси (<span id="ai-count-movements">0</span>)
-            </button>
-          </div>
-
-          <div class="relative w-48">
-            <input id="ai-input-search" type="text" placeholder="Пошук у висновках..." class="w-full bg-black/60 border border-white/15 text-xs text-gray-100 rounded-lg pl-2.5 pr-6 py-1 outline-none focus:border-purple-400">
-            <button id="ai-btn-clear-search" class="absolute right-2 top-1 text-gray-400 hover:text-white text-xs hidden">✕</button>
-          </div>
-        </div>
-
-        <!-- Стрічка карток тактичного аналізу ШІ -->
-        <div id="ai-analysis-feed" class="flex-1 overflow-y-auto space-y-3 pr-1.5 pb-12" tabindex="0" aria-label="Стрічка тактичного аналізу ШІ">
-          <div id="ai-feed-empty" class="text-center py-20 text-gray-400">
-            <div class="w-12 h-12 mx-auto mb-2 text-purple-400/60 flex items-center justify-center rounded-full bg-purple-500/10 border border-purple-500/20 text-xl font-bold">
-              🧠
-            </div>
-            <p class="text-sm font-semibold text-gray-200">Очікування повідомлень для аналізу...</p>
-            <p class="text-xs text-gray-400 mt-1">Штучний інтелект аналізує вхідний потік у реальному часі</p>
-          </div>
-        </div>
-
-      </div>
-
     </div>
 
   </main>
 
   <!-- ========================================================
-       6. Мобільна нижня панель перемикання вкладок
+       6. Мобільна нижня панель перемикання вкладок (горизонтально гортана)
   ======================================================== -->
-  <nav id="mobile-nav-bar" class="lg:hidden fixed bottom-0 left-0 right-0 h-12 liquid-glass z-40 flex items-center justify-around px-1 border-t border-white/15 bg-black/90 backdrop-blur-xl">
-    <button id="m-tab-map" class="mobile-tab active flex flex-col items-center justify-center py-0.5 text-[10px] font-semibold text-sky-400">
+  <nav id="mobile-nav-bar" class="lg:hidden fixed bottom-0 left-0 right-0 h-14 liquid-glass z-40 flex items-center gap-1.5 px-3 border-t border-white/15 bg-black/95 backdrop-blur-xl overflow-x-auto whitespace-nowrap scrollbar-none scroll-touch scroll-smooth" role="tablist">
+    <button id="m-tab-map" class="mobile-tab active flex-shrink-0 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-semibold bg-sky-600 text-white shadow transition-all">
       <span class="text-base leading-none">🗺️</span>
       <span>Карта</span>
     </button>
-    <button id="m-tab-alerts" class="mobile-tab flex flex-col items-center justify-center py-0.5 text-[10px] font-medium text-gray-400 relative" aria-label="Вкладка Офіційні тривоги">
+    <button id="m-tab-alerts" class="mobile-tab flex-shrink-0 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium text-gray-300 hover:text-white border border-transparent transition-all relative" aria-label="Вкладка Офіційні тривоги">
       <span class="text-base leading-none">🚨</span>
       <span>Тривоги</span>
-      <span id="m-nav-alerts-badge" class="hidden absolute top-0 right-2 px-1 py-0.2 rounded-full text-[9px] font-mono bg-red-600 text-white font-bold leading-tight">0</span>
+      <span id="m-nav-alerts-badge" class="hidden px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-red-600 text-white font-bold leading-tight">0</span>
     </button>
-    <button id="m-tab-telegram" class="mobile-tab flex flex-col items-center justify-center py-0.5 text-[10px] font-medium text-gray-400 relative" aria-label="Вкладка Сповіщення">
+    <button id="m-tab-telegram" class="mobile-tab flex-shrink-0 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium text-gray-300 hover:text-white border border-transparent transition-all relative" aria-label="Вкладка Сповіщення">
       <span class="text-base leading-none">🔔</span>
       <span>Сповіщення</span>
-      <span id="m-tg-badge" class="hidden absolute top-0.5 right-4 w-2 h-2 rounded-full bg-sky-400"></span>
+      <span id="m-tg-badge" class="hidden w-2 h-2 rounded-full bg-sky-400"></span>
     </button>
-    <button id="m-tab-ai" class="mobile-tab flex flex-col items-center justify-center py-0.5 text-[10px] font-medium text-gray-400 relative" aria-label="Вкладка ШІ">
+    <button id="m-tab-ai" class="mobile-tab flex-shrink-0 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium text-gray-300 hover:text-white border border-transparent transition-all relative" aria-label="Вкладка ШІ">
       <span class="text-base leading-none">🧠</span>
       <span>ШІ</span>
     </button>
-    <button id="m-tab-settings" class="mobile-tab flex flex-col items-center justify-center py-0.5 text-[10px] font-medium text-gray-400">
+    <button id="m-tab-settings" class="mobile-tab flex-shrink-0 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium text-gray-300 hover:text-white border border-transparent transition-all">
       <span class="text-base leading-none">⚙️</span>
-      <span>Опції</span>
+      <span>Налаштування</span>
     </button>
   </nav>
 
@@ -776,24 +791,8 @@
 
           <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <div>
-              <p class="font-semibold text-gray-200">🟡 4. LLM-аналіз повідомлень</p>
-              <p class="text-[11px] text-gray-400">Інтелектуальне структурування тексту та детекція загроз</p>
-            </div>
-            <input id="setting-llm-analysis-enabled" type="checkbox" checked class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
-          </label>
-
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
-            <div>
-              <p class="font-semibold text-gray-200">🧠 5. Вкладка «ШІ» у навігації</p>
-              <p class="text-[11px] text-gray-400">Відображати окрему вкладку тактичного аналізу ШІ</p>
-            </div>
-            <input id="setting-ai-tab-visible" type="checkbox" checked class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
-          </label>
-
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
-            <div>
               <p class="font-semibold text-gray-200">🔊 Звуковий супровід</p>
-              <p class="text-[11px] text-gray-400">Сирена тривоги + Chime загрози (Public Domain)</p>
+              <p class="text-[11px] text-gray-400">Сирена тривоги + Chime загрози</p>
             </div>
             <div class="flex items-center space-x-2">
               <button id="btn-test-sound" type="button" class="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-300 font-mono">
@@ -810,6 +809,61 @@
             </div>
             <input id="setting-quiet-hours" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
           </label>
+        </div>
+
+        <!-- Секція 2: ШІ (Окремий структурований блок за вимогою п.7) -->
+        <div class="space-y-2.5 p-3 rounded-xl bg-purple-950/20 border border-purple-500/30">
+          <div class="flex items-center justify-between pb-2 border-b border-purple-500/20">
+            <div>
+              <h4 class="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
+                <span>🧠</span> <span>Штучний Інтелект (ШІ)</span>
+              </h4>
+              <p class="text-[10px] text-gray-400 mt-0.5" id="ai-status-subtext">Вимкнено за замовчуванням</p>
+            </div>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="text-xs font-mono font-bold" id="ai-toggle-label">Вимкнено</span>
+              <input id="setting-ai-master-enabled" type="checkbox" class="w-5 h-5 accent-purple-500 rounded cursor-pointer">
+            </label>
+          </div>
+
+          <div class="p-2 rounded bg-purple-900/20 border border-purple-500/20 text-[10px] text-purple-200/90 leading-relaxed">
+            💡 <b>ШІ аналізує інформаційні повідомлення</b> з доступних джерел та допомагає визначити їхню територіальну прив'язку й тип інформації. ШІ не замінює офіційні дані NEPTUN.
+          </div>
+
+          <div id="ai-settings-suboptions" class="space-y-2 pt-1 opacity-50 pointer-events-none transition-all">
+            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+              <span class="text-xs text-gray-200">Аналіз інформаційних повідомлень</span>
+              <input id="setting-ai-analyze-messages" type="checkbox" class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
+            </label>
+
+            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+              <span class="text-xs text-gray-200">AI-сповіщення</span>
+              <input id="setting-ai-notifications" type="checkbox" class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
+            </label>
+
+            <div class="p-2 rounded-lg bg-black/40 border border-white/10 space-y-1">
+              <label for="setting-ai-regions" class="text-xs text-gray-300 block">Регіони для аналізу:</label>
+              <select id="setting-ai-regions" class="w-full bg-black/60 border border-white/20 text-xs text-gray-100 rounded px-2 py-1 outline-none focus:border-purple-400">
+                <option value="all">Вся Україна (Всі регіони)</option>
+                <option value="followed">Тільки мої обрані території (⭐)</option>
+              </select>
+            </div>
+
+            <div class="p-2 rounded-lg bg-black/40 border border-white/10 space-y-1.5">
+              <span class="text-xs text-gray-300 block">Типи інформації:</span>
+              <div class="flex flex-wrap gap-3 pt-0.5">
+                <label class="flex items-center gap-1.5 text-xs text-gray-200 cursor-pointer">
+                  <input id="setting-ai-type-threats" type="checkbox" checked class="w-3.5 h-3.5 accent-purple-500"> Загрози
+                </label>
+                <label class="flex items-center gap-1.5 text-xs text-gray-200 cursor-pointer">
+                  <input id="setting-ai-type-launches" type="checkbox" checked class="w-3.5 h-3.5 accent-purple-500"> Запуски
+                </label>
+                <label class="flex items-center gap-1.5 text-xs text-gray-200 cursor-pointer">
+                  <input id="setting-ai-type-info" type="checkbox" checked class="w-3.5 h-3.5 accent-purple-500"> Інформаційні
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Секція 2: Карта -->

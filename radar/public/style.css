@@ -56,6 +56,19 @@ body {
   transform: translateY(-1px);
 }
 
+/* Horizontal swipeable navigation */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
 /* Скляний повзунок (Glass Range Slider) */
 .glass-range {
   -webkit-appearance: none;

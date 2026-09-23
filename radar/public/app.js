@@ -610,8 +610,6 @@ const ChangeDetector = {
 
     // 1. Відбої тривог
     for (const item of removed) {
-      TelegramFeedService.addAlertNotification(item, true);
-
       if (!isInitialLoad) {
         const place = item.name;
         const isFollowed = FollowManager.matchesFollowed(place) || (item.oblast && FollowManager.matchesFollowed(item.oblast));
@@ -643,9 +641,6 @@ const ChangeDetector = {
       const levelTitle = isYellow ? 'зафіксовано офіційний жовтий рівень' : 'оголошено повітряну тривогу';
 
       const isFollowed = FollowManager.matchesFollowed(place) || (item.oblast && FollowManager.matchesFollowed(item.oblast));
-
-      // Завжди реєструємо сповіщення в універсальному хабі сповіщень
-      TelegramFeedService.addAlertNotification(item, false);
 
       const exactStartTime = item.since ? new Date(item.since).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : timeStr;
 
@@ -681,8 +676,6 @@ const ChangeDetector = {
 
     // 3. Зміна офіційного рівня небезпеки (yellow ↔ red)
     for (const { prev, unit } of changed) {
-      TelegramFeedService.addAlertNotification(unit, false);
-
       if (!isInitialLoad) {
         const place = unit.name;
         const newLvl = (unit.level || '').toUpperCase();
@@ -1180,10 +1173,10 @@ const TelegramFeedService = {
 
   bindEvents() {
     const btnAll      = document.getElementById('tg-btn-filter-all');
-    const btnAlerts   = document.getElementById('tg-btn-filter-alerts');
     const btnThreats  = document.getElementById('tg-btn-filter-threats');
     const btnMessages = document.getElementById('tg-btn-filter-messages');
     const btnFollowed = document.getElementById('tg-btn-filter-followed');
+    const btnAi       = document.getElementById('tg-btn-filter-ai');
     const searchInput = document.getElementById('tg-input-search');
     const clearBtn    = document.getElementById('tg-btn-clear-search');
 
@@ -1199,10 +1192,10 @@ const TelegramFeedService = {
     };
 
     btnAll?.addEventListener('click',      () => setFilter('all', btnAll));
-    btnAlerts?.addEventListener('click',   () => setFilter('alerts', btnAlerts));
     btnThreats?.addEventListener('click',  () => setFilter('threats', btnThreats));
     btnMessages?.addEventListener('click', () => setFilter('messages', btnMessages));
     btnFollowed?.addEventListener('click', () => setFilter('followed', btnFollowed));
+    btnAi?.addEventListener('click',       () => setFilter('ai', btnAi));
 
     searchInput?.addEventListener('input', (e) => {
       this.searchQuery = e.target.value.trim().toLowerCase();
@@ -1294,8 +1287,21 @@ const TelegramFeedService = {
 
   async analyzeMessageAsync(msg, followedList) {
     const s = StorageManager.getSettings();
-    if (s.llmAnalysisEnabled === false) return;
-    const key = msg.id || `${msg.channel || ''}::${msg.date || ''}::${(msg.text || '').slice(0, 40)}`;
+    // Вимога п.6: AI повинен бути вимкненим за замовчуванням. Якщо вимкнено — жодних запитів та фонового аналізу!
+    if (s.aiEnabled !== true || s.aiAnalyzeMessages === false) return;
+
+    // Перевірка фільтру регіону для аналізу (Вимога п.7: Регіони для аналізу)
+    if (s.aiRegions === 'followed' && FollowManager.followedSet.size > 0) {
+      const text = (msg.text || '').toLowerCase();
+      let matches = false;
+      for (const f of FollowManager.followedSet) {
+        if (text.includes(f.toLowerCase())) { matches = true; break; }
+      }
+      if (!matches) return;
+    }
+
+    // Стабільний відбиток повідомлення (Вимога п.15: channel + text + date)
+    const key = msg.id || `${msg.channel || ''}::${(msg.date || '').slice(0, 19)}::${(msg.text || '').trim()}`;
     if (this.analyzedCache.has(key)) return;
 
     let analysis = null;
@@ -1322,6 +1328,13 @@ const TelegramFeedService = {
     }
 
     if (analysis) {
+      // Фільтрація за типами інформації (Вимога п.7)
+      const isThreat = analysis.category === 'active_threat' || analysis.category === 'possible_threat';
+      const isLaunch = (analysis.summary || '').toLowerCase().includes('пуск') || (analysis.summary || '').toLowerCase().includes('запуск');
+      if (isThreat && s.aiTypeThreats === false) return;
+      if (isLaunch && s.aiTypeLaunches === false) return;
+      if (!isThreat && !isLaunch && s.aiTypeInfo === false) return;
+
       this.analyzedCache.set(key, analysis);
       msg._analysis = analysis;
 
@@ -1338,11 +1351,10 @@ const TelegramFeedService = {
         this.saveNotifications();
       }
 
-      const s = StorageManager.getSettings();
-      if (analysis.relevant && s.llmAnalysisEnabled && !isInitialLoad) {
+      if (analysis.relevant && s.aiEnabled && s.aiNotifications && !isInitialLoad) {
         if (analysis.category === 'active_threat' || analysis.category === 'possible_threat') {
           SoundService.playInfoChime();
-          NotificationManager.send(`🟡 LLM [${(analysis.territories || []).join(', ')}]`, analysis.summary);
+          NotificationManager.send(`🧠 ШІ [${(analysis.territories || []).join(', ') || 'Загроза'}]`, analysis.summary);
         }
       }
 
@@ -1355,16 +1367,17 @@ const TelegramFeedService = {
   },
 
   updateCounters() {
-    const total = this.notifications.length;
-    let alertCount = 0, threatCount = 0, msgCount = 0, followedCount = 0;
+    let threatCount = 0, msgCount = 0, followedCount = 0, aiCount = 0;
 
     for (const n of this.notifications) {
-      if (n.type === 'alert') alertCount++;
-      else if (n.type === 'threat') threatCount++;
+      if (n.type === 'threat') threatCount++;
       else if (n.type === 'message') msgCount++;
 
+      if (n.analysis || n.type === 'ai') aiCount++;
       if (this.isFollowedNotification(n)) followedCount++;
     }
+
+    const total = this.notifications.length;
 
     const set = (id, val) => {
       const el = document.getElementById(id);
@@ -1372,10 +1385,10 @@ const TelegramFeedService = {
     };
 
     set('tg-count-all', total);
-    set('tg-count-alerts', alertCount);
     set('tg-count-threats', threatCount);
     set('tg-count-messages', msgCount);
     set('tg-count-followed', followedCount);
+    set('tg-count-ai', aiCount);
 
     const badgeDesktop = document.getElementById('tab-telegram-badge');
     const badgeMobile  = document.getElementById('m-tg-badge');
@@ -1474,14 +1487,14 @@ const TelegramFeedService = {
     }
 
     // 2. Фільтр за категорією
-    if (this.filterMode === 'alerts') {
-      filtered = filtered.filter(n => n.type === 'alert');
-    } else if (this.filterMode === 'threats') {
+    if (this.filterMode === 'threats') {
       filtered = filtered.filter(n => n.type === 'threat');
     } else if (this.filterMode === 'messages') {
       filtered = filtered.filter(n => n.type === 'message');
     } else if (this.filterMode === 'followed') {
       filtered = filtered.filter(n => this.isFollowedNotification(n));
+    } else if (this.filterMode === 'ai') {
+      filtered = filtered.filter(n => n.analysis || n.type === 'ai');
     }
 
     // 3. Пошуковий фільтр
@@ -1792,17 +1805,23 @@ const NavigationController = {
     if (activeDesktopBtn) {
       activeDesktopBtn.classList.add('active', 'bg-sky-600', 'text-white', 'shadow');
       activeDesktopBtn.classList.remove('text-gray-300');
+      try {
+        activeDesktopBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      } catch (e) {}
     }
 
-    // Mobile buttons
+    // Mobile buttons (горизонтально гортана панель)
     document.querySelectorAll('.mobile-tab').forEach(b => {
-      b.classList.remove('active', 'text-sky-400');
-      b.classList.add('text-gray-400');
+      b.classList.remove('active', 'bg-sky-600', 'text-white', 'shadow');
+      b.classList.add('text-gray-300', 'border-transparent');
     });
     const activeMobileBtn = document.getElementById(`m-tab-${tab}`);
     if (activeMobileBtn) {
-      activeMobileBtn.classList.add('active', 'text-sky-400');
-      activeMobileBtn.classList.remove('text-gray-400');
+      activeMobileBtn.classList.add('active', 'bg-sky-600', 'text-white', 'shadow');
+      activeMobileBtn.classList.remove('text-gray-300', 'border-transparent');
+      try {
+        activeMobileBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      } catch (e) {}
     }
 
     const viewAlerts   = document.getElementById('view-alerts');
@@ -1827,6 +1846,7 @@ const NavigationController = {
       viewTelegram?.classList.add('hidden');
       viewAi?.classList.remove('hidden');
       leftPanel?.classList.add('hidden');
+      AIService?.updateEnabledState();
       AIService?.render();
     } else {
       // map tab
@@ -3441,36 +3461,75 @@ const UIController = {
     const modal          = document.getElementById('settings-modal');
     const btnOpen        = document.getElementById('btn-open-settings');
     const btnClose       = document.getElementById('btn-close-settings');
-    const btnSave        = document.getElementById('btn-save-settings');
-    const notifCheck     = document.getElementById('setting-notifications-enabled');
-    const officialCheck  = document.getElementById('setting-official-alerts-enabled');
-    const infoCheck      = document.getElementById('setting-info-messages-enabled');
-    const soundCheck     = document.getElementById('setting-sound-enabled');
-    const quietCheck     = document.getElementById('setting-quiet-hours');
-    const opRange        = document.getElementById('setting-zone-opacity');
-    const threatsCheck   = document.getElementById('setting-threats-alerts-enabled');
-    const llmCheck       = document.getElementById('setting-llm-analysis-enabled');
-    const opLabel        = document.getElementById('label-zone-opacity');
-    const layerAlerts    = document.getElementById('setting-layer-alerts');
-    const layerThreats   = document.getElementById('setting-layer-threats');
-    const animCheck      = document.getElementById('setting-enable-animations');
-    const aiTabCheck     = document.getElementById('setting-ai-tab-visible');
+    const btnSave          = document.getElementById('btn-save-settings');
+    const notifCheck       = document.getElementById('setting-notifications-enabled');
+    const officialCheck    = document.getElementById('setting-official-alerts-enabled');
+    const infoCheck        = document.getElementById('setting-info-messages-enabled');
+    const soundCheck       = document.getElementById('setting-sound-enabled');
+    const quietCheck       = document.getElementById('setting-quiet-hours');
+    const opRange          = document.getElementById('setting-zone-opacity');
+    const threatsCheck     = document.getElementById('setting-threats-alerts-enabled');
+    const opLabel          = document.getElementById('label-zone-opacity');
+    const layerAlerts      = document.getElementById('setting-layer-alerts');
+    const layerThreats     = document.getElementById('setting-layer-threats');
+    const animCheck        = document.getElementById('setting-enable-animations');
+
+    // ШІ налаштування (Вимога п.7)
+    const aiMasterCheck    = document.getElementById('setting-ai-master-enabled');
+    const aiAnalyzeCheck   = document.getElementById('setting-ai-analyze-messages');
+    const aiNotifCheck     = document.getElementById('setting-ai-notifications');
+    const aiRegionsSelect  = document.getElementById('setting-ai-regions');
+    const aiTypeThreats    = document.getElementById('setting-ai-type-threats');
+    const aiTypeLaunches   = document.getElementById('setting-ai-type-launches');
+    const aiTypeInfo       = document.getElementById('setting-ai-type-info');
+
+    const updateAiSuboptionsState = (enabled) => {
+      const sub = document.getElementById('ai-settings-suboptions');
+      const lbl = document.getElementById('ai-toggle-label');
+      const subtxt = document.getElementById('ai-status-subtext');
+      if (sub) {
+        sub.classList.toggle('opacity-50', !enabled);
+        sub.classList.toggle('pointer-events-none', !enabled);
+      }
+      if (lbl) {
+        lbl.textContent = enabled ? 'Увімкнено' : 'Вимкнено';
+        lbl.className = enabled ? 'text-xs font-mono font-bold text-purple-400' : 'text-xs font-mono font-bold text-gray-400';
+      }
+      if (subtxt) {
+        subtxt.textContent = enabled ? '● Активний (аналіз у реальному часі)' : 'Вимкнено за замовчуванням';
+        subtxt.className = enabled ? 'text-[10px] text-purple-300 mt-0.5 font-medium' : 'text-[10px] text-gray-400 mt-0.5';
+      }
+    };
+
+    aiMasterCheck?.addEventListener('change', (e) => {
+      updateAiSuboptionsState(e.target.checked);
+    });
 
     const openModal = () => {
       const s = StorageManager.getSettings();
-      if (notifCheck)    notifCheck.checked    = s.notificationsEnabled;
-      if (officialCheck) officialCheck.checked = s.officialAlertsEnabled;
-      if (threatsCheck)  threatsCheck.checked  = s.threatsAlertsEnabled !== false;
-      if (infoCheck)     infoCheck.checked     = s.infoMessagesEnabled !== false;
-      if (llmCheck)      llmCheck.checked      = s.llmAnalysisEnabled !== false;
-      if (aiTabCheck)    aiTabCheck.checked    = s.aiTabVisible !== false;
-      if (soundCheck)    soundCheck.checked    = s.soundEnabled;
-      if (quietCheck)    quietCheck.checked    = s.quietHours;
-      if (opRange)       opRange.value         = s.zoneOpacity || 0.35;
-      if (opLabel)       opLabel.textContent   = `${Math.round((s.zoneOpacity || 0.35) * 100)}%`;
-      if (layerAlerts)   layerAlerts.checked   = s.layerAlerts;
-      if (layerThreats)  layerThreats.checked  = s.layerThreats;
-      if (animCheck)     animCheck.checked     = s.enableAnimations;
+      if (notifCheck)      notifCheck.checked      = s.notificationsEnabled;
+      if (officialCheck)   officialCheck.checked   = s.officialAlertsEnabled;
+      if (threatsCheck)    threatsCheck.checked    = s.threatsAlertsEnabled !== false;
+      if (infoCheck)       infoCheck.checked       = s.infoMessagesEnabled !== false;
+      if (soundCheck)      soundCheck.checked      = s.soundEnabled;
+      if (quietCheck)      quietCheck.checked      = s.quietHours;
+      if (opRange)         opRange.value           = s.zoneOpacity || 0.35;
+      if (opLabel)         opLabel.textContent     = `${Math.round((s.zoneOpacity || 0.35) * 100)}%`;
+      if (layerAlerts)     layerAlerts.checked     = s.layerAlerts;
+      if (layerThreats)    layerThreats.checked    = s.layerThreats;
+      if (animCheck)       animCheck.checked       = s.enableAnimations;
+
+      // Завантаження стану ШІ
+      const aiOn = s.aiEnabled === true;
+      if (aiMasterCheck)   aiMasterCheck.checked   = aiOn;
+      if (aiAnalyzeCheck)  aiAnalyzeCheck.checked  = s.aiAnalyzeMessages !== false;
+      if (aiNotifCheck)    aiNotifCheck.checked    = s.aiNotifications === true;
+      if (aiRegionsSelect) aiRegionsSelect.value   = s.aiRegions || 'all';
+      if (aiTypeThreats)   aiTypeThreats.checked   = s.aiTypeThreats !== false;
+      if (aiTypeLaunches)  aiTypeLaunches.checked  = s.aiTypeLaunches !== false;
+      if (aiTypeInfo)      aiTypeInfo.checked      = s.aiTypeInfo !== false;
+      updateAiSuboptionsState(aiOn);
+
       modal?.classList.remove('hidden');
     };
 
@@ -3515,8 +3574,14 @@ const UIController = {
         officialAlertsEnabled: officialCheck?.checked !== false,
         threatsAlertsEnabled:  threatsCheck?.checked !== false,
         infoMessagesEnabled:   infoCheck?.checked !== false,
-        llmAnalysisEnabled:    llmCheck?.checked !== false,
-        aiTabVisible:          aiTabCheck?.checked !== false,
+        aiEnabled:             aiMasterCheck?.checked === true,
+        aiAnalyzeMessages:     aiAnalyzeCheck?.checked !== false,
+        aiNotifications:       aiNotifCheck?.checked === true,
+        aiRegions:             aiRegionsSelect?.value || 'all',
+        aiTypeThreats:         aiTypeThreats?.checked !== false,
+        aiTypeLaunches:        aiTypeLaunches?.checked !== false,
+        aiTypeInfo:            aiTypeInfo?.checked !== false,
+        aiTabVisible:          true,
         soundEnabled:          soundCheck?.checked !== false,
         quietHours:            quietCheck?.checked || false,
         zoneOpacity:           parseFloat(opRange?.value || 0.35),
@@ -3526,11 +3591,13 @@ const UIController = {
       };
       StorageManager.saveSettings(updated);
       NavigationController.applyTabVisibility();
+      AIService?.updateEnabledState();
+      AIService?.render();
       modal?.classList.add('hidden');
       document.body.classList.toggle('disable-animations', !updated.enableAnimations);
       MapService.updateAllDistrictStyles();
       for (const t of State.threats.values()) MapService.updateThreat(t);
-      showToast('✅ Налаштування збережено');
+      showToast(updated.aiEnabled ? '✅ Налаштування збережено (ШІ увімкнено)' : '✅ Налаштування збережено (ШІ вимкнено)');
 
       setTimeout(() => {
         btnSave.disabled = false;
@@ -3690,7 +3757,13 @@ const StorageManager = {
     officialAlertsEnabled: true,
     threatsAlertsEnabled:  true,
     infoMessagesEnabled:   true,
-    llmAnalysisEnabled:    true,
+    aiEnabled:             false, // Вимога п.6: ШІ за замовчуванням вимкнений!
+    aiAnalyzeMessages:     false,
+    aiNotifications:       false,
+    aiRegions:             'all',
+    aiTypeThreats:         true,
+    aiTypeLaunches:        true,
+    aiTypeInfo:            true,
     aiTabVisible:          true,
     soundEnabled:          true,
     quietHours:            false,
@@ -3731,6 +3804,10 @@ const AIService = {
       this.runInteractiveTest();
     });
 
+    document.getElementById('btn-ai-open-settings')?.addEventListener('click', () => {
+      UIController.openSettingsModal?.();
+    });
+
     ['all', 'threats', 'movements'].forEach(cat => {
       document.getElementById(`ai-filter-${cat}`)?.addEventListener('click', () => {
         this.activeCategory = cat;
@@ -3761,24 +3838,21 @@ const AIService = {
       this.renderFeed();
     });
 
-    const settingActive = document.getElementById('ai-setting-active');
-    if (settingActive) {
-      settingActive.addEventListener('change', (e) => {
-        const s = StorageManager.getSettings();
-        s.llmAnalysisEnabled = e.target.checked;
-        StorageManager.saveSettings(s);
-        showToast(s.llmAnalysisEnabled ? '🧠 ШІ-аналіз активовано' : 'ШІ-аналіз призупинено');
-      });
-    }
+    this.updateEnabledState();
+  },
 
-    const settingFocus = document.getElementById('ai-setting-region-focus');
-    if (settingFocus) {
-      settingFocus.addEventListener('change', () => {
-        this.renderFeed();
-      });
-    }
+  updateEnabledState() {
+    const s = StorageManager.getSettings();
+    const disabledContainer = document.getElementById('ai-disabled-container');
+    const enabledContainer  = document.getElementById('ai-enabled-container');
+    const isEnabled = s.aiEnabled === true;
 
-    this.fetchEngineStatus();
+    if (disabledContainer) disabledContainer.classList.toggle('hidden', isEnabled);
+    if (enabledContainer)  enabledContainer.classList.toggle('hidden', !isEnabled);
+
+    if (isEnabled) {
+      this.fetchEngineStatus();
+    }
   },
 
   async fetchEngineStatus(notify = false) {
@@ -3905,6 +3979,9 @@ const AIService = {
   },
 
   render() {
+    const s = StorageManager.getSettings();
+    this.updateEnabledState();
+    if (!s.aiEnabled) return;
     this.renderFeed();
   },
 
@@ -3938,8 +4015,10 @@ const AIService = {
       filtered = filtered.filter(n => n.analysis.category === 'possible_threat');
     }
 
-    const focusRegion = document.getElementById('ai-setting-region-focus')?.checked;
-    if (focusRegion && State.selectedRegion && State.selectedRegion !== 'all') {
+    const s = StorageManager.getSettings();
+    if (s.aiRegions === 'followed' && FollowManager.followedSet.size > 0) {
+      filtered = filtered.filter(n => TelegramFeedService.isFollowedNotification(n));
+    } else if (State.selectedRegion && State.selectedRegion !== 'all') {
       filtered = filtered.filter(n => TelegramFeedService.matchesRegion(n));
     }
 
@@ -3983,9 +4062,12 @@ const AIService = {
     const badgeText = isThreat ? '🔴 ПРЯМА ЗАГРОЗА' : (isMovement ? '🟠 МОЖЛИВА ЗАГРОЗА' : '🔵 ОБСТАНОВКА');
     const badgeBg = isThreat ? 'bg-red-500/20 text-red-300 border-red-500/30' : (isMovement ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-sky-500/20 text-sky-300 border-sky-500/30');
 
-    const territories = (a.territories || []).map(t => 
-      `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/10 text-gray-200 border border-white/15">📍 ${escapeHtml(t)}</span>`
-    ).join(' ');
+    // Вимога п.11: AI не має вигадувати — якщо територія не вказана, виводимо "Не вказано у джерелі"
+    const territories = (a.territories && a.territories.length)
+      ? a.territories.map(t => 
+          `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/10 text-gray-200 border border-white/15">📍 ${escapeHtml(t)}</span>`
+        ).join(' ')
+      : '<span class="text-[10px] text-gray-400 font-mono italic">Територія: Не вказано у джерелі</span>';
 
     const timeStr = n.eventTime ? formatApiDate(n.eventTime) : (n.receivedAt ? formatApiDate(n.receivedAt) : '');
     const firstTerritory = (a.territories && a.territories[0]) || n.territory || '';
@@ -4004,20 +4086,27 @@ const AIService = {
           <p class="text-xs text-purple-200 font-medium leading-relaxed">${escapeHtml(a.summary || '')}</p>
         </div>
 
-        ${territories ? `<div class="flex flex-wrap gap-1.5 mb-2.5">${territories}</div>` : ''}
+        <div class="flex flex-wrap items-center gap-1.5 mb-2.5">
+          ${territories}
+        </div>
 
-        <div class="p-2 rounded bg-black/40 border border-white/5 text-[11px] text-gray-400 font-sans italic leading-normal mb-2.5">
+        <!-- Обов'язкове збереження оригінального тексту повідомлення (Вимога п.10) -->
+        <div class="p-2.5 rounded-lg bg-black/50 border border-white/10 text-[11px] text-gray-300 font-sans leading-relaxed mb-2">
+          <div class="text-[9px] uppercase font-bold text-gray-400 mb-1 font-mono">Оригінальне повідомлення:</div>
           «${escapeHtml(n.message || '')}»
         </div>
 
-        <div class="flex items-center justify-between pt-1 text-[10px] text-gray-400 font-mono">
+        <div class="flex items-center justify-between pt-1.5 border-t border-white/5 text-[10px] text-gray-400 font-mono">
           <span class="flex items-center gap-1">
-            <span>Рушій:</span> <b>${a.engine === 'gemini' ? 'Gemini 1.5 Flash' : 'Локальний NLP'}</b> | Впевненість: <b>${Math.round((a.confidence || 0.9) * 100)}%</b>
+            <span>Рушій:</span> <b>${a.engine === 'gemini' ? 'Gemini Free Tier' : 'Локальний NLP'}</b> | Впевненість: <b>${Math.round((a.confidence || 0.9) * 100)}%</b>
           </span>
-          ${firstTerritory ? `
-            <button class="px-2 py-1 rounded bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/40 text-[10px] font-mono font-semibold transition-colors" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${escapeHtml(firstTerritory)}');">
-              🗺️ На карті
-            </button>` : ''}
+          <div class="flex items-center gap-2">
+            <span class="text-[9px] text-gray-500 hidden sm:inline">ШІ не замінює дані NEPTUN</span>
+            ${firstTerritory ? `
+              <button class="px-2 py-1 rounded bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/40 text-[10px] font-mono font-semibold transition-colors" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${escapeHtml(firstTerritory)}');">
+                🗺️ На карті
+              </button>` : ''}
+          </div>
         </div>
       </article>`;
   }
