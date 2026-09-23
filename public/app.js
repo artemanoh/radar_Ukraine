@@ -451,7 +451,9 @@ const NotificationDispatcher = {
 
     // 6. Звуковий супровід (без дублювання: грає 1 раз тільки відповідний звук)
     if (s.soundEnabled && !SoundService.isQuietTime()) {
-      if (isUrgent) {
+      if (isClear) {
+        SoundService.playClearSound();
+      } else if (isUrgent) {
         SoundService.playUrgentSiren();
       } else if (type === NOTIFICATION_CATEGORIES.OFFICIAL_ALERT) {
         SoundService.playAlertSiren();
@@ -3803,20 +3805,25 @@ const UIController = {
       }
     });
 
+    document.getElementById('btn-test-alert')?.addEventListener('click', () => {
+      SoundService.playAlertSiren();
+      showToast('🔊 Тест: Оголошення тривоги');
+    });
+
+    document.getElementById('btn-test-clear')?.addEventListener('click', () => {
+      SoundService.playClearSound();
+      showToast('🔊 Тест: Відбій тривоги');
+    });
+
+    document.getElementById('btn-test-urgent')?.addEventListener('click', () => {
+      SoundService.playUrgentSiren();
+      showToast('🔊 Тест: Високий рівень небезпеки', true);
+    });
+
     const testSoundBtn = document.getElementById('btn-test-sound');
     testSoundBtn?.addEventListener('click', () => {
-      if (testSoundBtn.disabled) return;
-      testSoundBtn.disabled = true;
-      const originalText = testSoundBtn.textContent;
-      testSoundBtn.textContent = 'Відтворення...';
-      SoundService.playUrgentSiren();
-      setTimeout(() => SoundService.playAlertSiren(), 900);
-      setTimeout(() => SoundService.playInfoChime(), 1750);
-      showToast('🔊 Тест звуку: Терміновий + Сирена + Chime', true);
-      setTimeout(() => {
-        testSoundBtn.disabled = false;
-        testSoundBtn.textContent = originalText;
-      }, 2300);
+      SoundService.playAlertSiren();
+      showToast('🔊 Тест звуку: Оголошення тривоги');
     });
 
     btnSave?.addEventListener('click', () => {
@@ -3882,12 +3889,18 @@ const UIController = {
 const SoundService = {
   ctx: null,
   sirenAudio: null,
+  clearAudio: null,
+  urgentAudio: null,
   chimeAudio: null,
 
   init() {
     try {
-      this.sirenAudio = new Audio(`${BASE_PATH}sounds/siren.ogg`);
+      this.sirenAudio = new Audio(`${BASE_PATH}sounds/siren.mp3`);
       this.sirenAudio.preload = 'auto';
+      this.clearAudio = new Audio(`${BASE_PATH}sounds/clear.mp3`);
+      this.clearAudio.preload = 'auto';
+      this.urgentAudio = new Audio(`${BASE_PATH}sounds/urgent.mp3`);
+      this.urgentAudio.preload = 'auto';
       this.chimeAudio = new Audio(`${BASE_PATH}sounds/chime.ogg`);
       this.chimeAudio.preload = 'auto';
     } catch (e) {
@@ -3910,12 +3923,79 @@ const SoundService = {
     return h >= 23 || h < 7;
   },
 
+  stopAll() {
+    [this.sirenAudio, this.clearAudio, this.urgentAudio, this.chimeAudio].forEach(a => {
+      if (a) {
+        try {
+          a.pause();
+          a.currentTime = 0;
+        } catch (e) {}
+      }
+    });
+  },
+
   playUrgentSiren() {
     if (isInitialLoad) return;
     const s = StorageManager.getSettings();
     if (!s.soundEnabled || s.urgentAlertsEnabled === false || this.isQuietTime()) return;
 
-    this.synthesizeUrgentAlert();
+    this.stopAll();
+    if (this.urgentAudio) {
+      this.urgentAudio.currentTime = 0;
+      this.urgentAudio.play().catch(() => {
+        this.synthesizeUrgentAlert();
+      });
+    } else {
+      this.synthesizeUrgentAlert();
+    }
+  },
+
+  playAlertSiren() {
+    if (isInitialLoad) return;
+    const s = StorageManager.getSettings();
+    if (!s.soundEnabled || this.isQuietTime()) return;
+
+    this.stopAll();
+    if (this.sirenAudio) {
+      this.sirenAudio.currentTime = 0;
+      this.sirenAudio.play().catch(() => {
+        this.synthesizeSiren();
+      });
+    } else {
+      this.synthesizeSiren();
+    }
+  },
+
+  playClearSound() {
+    if (isInitialLoad) return;
+    const s = StorageManager.getSettings();
+    if (!s.soundEnabled || this.isQuietTime()) return;
+
+    this.stopAll();
+    if (this.clearAudio) {
+      this.clearAudio.currentTime = 0;
+      this.clearAudio.play().catch(() => {
+        this.synthesizeChime();
+      });
+    } else {
+      this.synthesizeChime();
+    }
+  },
+
+  playInfoChime() {
+    if (isInitialLoad) return;
+    const s = StorageManager.getSettings();
+    if (!s.soundEnabled || this.isQuietTime()) return;
+
+    this.stopAll();
+    if (this.chimeAudio) {
+      this.chimeAudio.currentTime = 0;
+      this.chimeAudio.play().catch(() => {
+        this.synthesizeChime();
+      });
+    } else {
+      this.synthesizeChime();
+    }
   },
 
   synthesizeUrgentAlert() {
@@ -3923,7 +4003,6 @@ const SoundService = {
       this.ensureContext();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      // Двотональний тактичний пульс високої уваги: 880Hz -> 587Hz -> 880Hz (тривалість 0.85с, без нескінченного зациклення)
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sawtooth';
@@ -3944,36 +4023,6 @@ const SoundService = {
       osc.start(now);
       osc.stop(now + 0.85);
     } catch (e) {}
-  },
-
-  playAlertSiren() {
-    if (isInitialLoad) return;
-    const s = StorageManager.getSettings();
-    if (!s.soundEnabled || this.isQuietTime()) return;
-
-    if (this.sirenAudio) {
-      this.sirenAudio.currentTime = 0;
-      this.sirenAudio.play().catch(() => {
-        this.synthesizeSiren();
-      });
-    } else {
-      this.synthesizeSiren();
-    }
-  },
-
-  playInfoChime() {
-    if (isInitialLoad) return;
-    const s = StorageManager.getSettings();
-    if (!s.soundEnabled || this.isQuietTime()) return;
-
-    if (this.chimeAudio) {
-      this.chimeAudio.currentTime = 0;
-      this.chimeAudio.play().catch(() => {
-        this.synthesizeChime();
-      });
-    } else {
-      this.synthesizeChime();
-    }
   },
 
   synthesizeSiren() {
