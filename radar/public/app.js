@@ -1288,10 +1288,10 @@ const AlertsInUaService = {
         this.isConfigured = false;
         return;
       }
-      if (res.status === 'ok' && res.data) {
+      if (res.status === 'ok' && (res.alerts || res.data)) {
         this.isConfigured = true;
         this.lastSync = new Date().toISOString();
-        this.processData(res.data);
+        this.processData(res);
       }
     } catch (e) {
       // Non-blocking fallback
@@ -1299,20 +1299,21 @@ const AlertsInUaService = {
   },
 
   processData(data) {
-    if (!data || !Array.isArray(data.alerts)) return;
-    const active = data.alerts.filter(a => !a.finished_at);
-    if (active.length > 0 && AlertsService.activeAlerts.size === 0) {
-      const mockRaw = {
-        data: active.map(a => ({
-          name: a.location_title,
-          oblast: a.location_oblast || a.location_title,
-          since: a.started_at,
-          level: 'red',
-          reasons: [a.alert_type || 'Повітряна тривога']
-        }))
-      };
-      AlertsService.handleRealtimeAlerts(mockRaw);
-    }
+    if (!data) return;
+    const alertsList = Array.isArray(data.alerts) ? data.alerts : (Array.isArray(data) ? data : []);
+    if (!alertsList.length) return;
+    const active = alertsList.filter(a => !a.finished_at);
+    const mockRaw = {
+      data: active.map(a => ({
+        name: a.location_title,
+        oblast: a.location_oblast || a.location_title,
+        started_at: a.started_at,
+        since: a.started_at,
+        level: 'red',
+        reasons: [a.alert_type || 'Повітряна тривога']
+      }))
+    };
+    AlertsService.handleRealtimeAlerts(mockRaw);
   }
 };
 
@@ -2456,6 +2457,9 @@ const MapService = {
 
   currentSelectedLayer:  null,
   currentPopup:          null,
+  apiKey:                '',
+  baseTileLayer:         null,
+  labelsTileLayer:       null,
 
   async init() {
     this.map = L.map('map', {
@@ -2467,6 +2471,21 @@ const MapService = {
       attributionControl: true
     });
 
+    // Отримуємо API Key (з налаштувань localStorage або сервера через .env)
+    let key = '';
+    try {
+      if (typeof StorageManager !== 'undefined') {
+        key = StorageManager.getSettings().cartoApiKey || '';
+      }
+      if (!key) {
+        const cfg = await fetchUtf8Json('/api/v1/map-config').catch(() => null);
+        if (cfg && cfg.apiKey) key = cfg.apiKey.trim();
+      }
+    } catch (e) {}
+    this.apiKey = key;
+
+    const keyParam = this.apiKey ? `?key=${encodeURIComponent(this.apiKey)}` : '';
+
     // 1. Створюємо окремий Leaflet pane для текстових підписів населених пунктів.
     // zIndex: 450 розташовує підписи НАД кольоровими полігонами тривог (overlayPane має zIndex: 400),
     // але ПІД тактичними маркерами цілей (markerPane має zIndex: 600).
@@ -2474,20 +2493,24 @@ const MapService = {
     labelsPane.style.zIndex = 450;
     labelsPane.style.pointerEvents = 'none';
 
-    // 2. Базовий темний картографічний шар (земля, вода, контури)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+    // 2. Базовий темний картографічний шар CARTO (земля, вода, контури)
+    this.baseTileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}{r}.png${keyParam}`, {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 16
     }).addTo(this.map);
 
-    // 3. Шар підписів міст та населених пунктів України (Київ, Вінниця, Жмеринка, Літин, Хмільник тощо)
+    // 3. Шар підписів міст та населених пунктів України
     // Рендериться в labelsPane, тому ніколи не перекривається червоними/жовтими зонами тривог!
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+    this.labelsTileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/dark_only_labels/{z}/{x}/{y}{r}.png${keyParam}`, {
       subdomains: 'abcd',
       maxZoom: 16,
       pane: 'labels'
     }).addTo(this.map);
+
+    // Безпечне гасіння помилок тайлів без витоку ключа чи URL
+    this.baseTileLayer.on('tileerror', () => {});
+    this.labelsTileLayer.on('tileerror', () => {});
 
     await Promise.all([
       this.loadDistrictsGeoJson(),
@@ -2513,6 +2536,17 @@ const MapService = {
     window.addEventListener('orientationchange', () => {
       setTimeout(handleMapResize, 150);
     });
+  },
+
+  updateApiKey(newKey) {
+    this.apiKey = (newKey || '').trim();
+    const keyParam = this.apiKey ? `?key=${encodeURIComponent(this.apiKey)}` : '';
+    if (this.baseTileLayer) {
+      this.baseTileLayer.setUrl(`https://{s}.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}{r}.png${keyParam}`);
+    }
+    if (this.labelsTileLayer) {
+      this.labelsTileLayer.setUrl(`https://{s}.basemaps.cartocdn.com/rastertiles/dark_only_labels/{z}/{x}/{y}{r}.png${keyParam}`);
+    }
   },
 
   updateMarkerScales() {
@@ -4075,7 +4109,7 @@ const AlertsService = {
     }
 
     const currentKeys = new Set();
-    let hasBrandNewAlert = false;
+    const brandNewUnits = [];
 
     for (const unit of incomingUnits) {
       if (!unit.name) continue;
@@ -4093,8 +4127,7 @@ const AlertsService = {
           existing.since      = unit.started_at;
         }
       } else {
-        hasBrandNewAlert = true;
-        this.activeAlerts.set(key, {
+        const newObj = {
           key,
           name:       unit.name,
           oblast:     unit.oblast,
@@ -4103,7 +4136,9 @@ const AlertsService = {
           level:      unit.level,
           reasons:    unit.reasons,
           status:     'active'
-        });
+        };
+        brandNewUnits.push(newObj);
+        this.activeAlerts.set(key, newObj);
       }
     }
 
@@ -4125,13 +4160,41 @@ const AlertsService = {
     this.updateCounters();
 
     if (NavigationController.currentTab === 'alerts') {
-      if (this.userScrolledDown && hasBrandNewAlert) {
+      const hasBrandNewAlert = brandNewUnits.length > 0;
+      let isRelevant = false;
+
+      if (hasBrandNewAlert) {
+        if (this.activeFilter === 'all') {
+          // У режимі «Всі» (вся Україна) будь-яка нова офіційна тривога в Україні є релевантною!
+          isRelevant = true;
+        } else if (this.activeFilter === 'followed') {
+          // У режимі «Вибрані області» нова тривога актуальна для відображення ТІЛЬКИ якщо вона входить до вибраних!
+          isRelevant = brandNewUnits.some(u => {
+            if (typeof GlobalTerritoryFilter !== 'undefined') {
+              return GlobalTerritoryFilter.passes({
+                type: 'OFFICIAL_ALERT',
+                oblastKey: u.key || u.oblast || u.name,
+                oblastName: u.name || u.oblast,
+                apiRegion: u.oblast || u.name,
+                apiDistrict: u.district || null
+              });
+            }
+            return FollowManager.matchesFollowed(u.name) || (u.oblast && FollowManager.matchesFollowed(u.oblast));
+          });
+        } else if (this.activeFilter === 'red') {
+          isRelevant = brandNewUnits.some(u => u.level !== 'yellow');
+        } else if (this.activeFilter === 'yellow') {
+          isRelevant = brandNewUnits.some(u => u.level === 'yellow');
+        }
+      }
+
+      if (this.userScrolledDown && isRelevant) {
         this.newAlertsCount++;
         const btn = document.getElementById('btn-alerts-new');
         const countEl = document.getElementById('btn-alerts-new-count');
         if (countEl) countEl.textContent = this.newAlertsCount;
         btn?.classList.remove('hidden');
-      } else {
+      } else if (!this.userScrolledDown && (isRelevant || !hasBrandNewAlert)) {
         this.render();
       }
     }
@@ -4147,9 +4210,19 @@ const AlertsService = {
     for (const a of list) {
       if (a.level === 'yellow') yellowCount++;
       else redCount++;
-      if (FollowManager.matchesFollowed(a.name) || (a.oblast && FollowManager.matchesFollowed(a.oblast))) {
-        followedCount++;
+      let isFollowed = false;
+      if (typeof GlobalTerritoryFilter !== 'undefined') {
+        isFollowed = GlobalTerritoryFilter.passes({
+          type: 'OFFICIAL_ALERT',
+          oblastKey: a.key || a.oblast || a.name,
+          oblastName: a.name || a.oblast,
+          apiRegion: a.oblast || a.name,
+          apiDistrict: a.district || null
+        });
+      } else {
+        isFollowed = FollowManager.matchesFollowed(a.name) || (a.oblast && FollowManager.matchesFollowed(a.oblast));
       }
+      if (isFollowed) followedCount++;
     }
 
     const setEl = (id, val) => {
@@ -4204,19 +4277,22 @@ const AlertsService = {
       } else if (this.activeFilter === 'yellow') {
         items = items.filter(a => a.level === 'yellow');
       } else if (this.activeFilter === 'followed') {
-        items = items.filter(a => FollowManager.matchesFollowed(a.name) || (a.oblast && FollowManager.matchesFollowed(a.oblast)));
+        // «ВИБРАНІ ОБЛАСТІ»: показуємо ТІЛЬКИ території, які користувач вибрав у налаштуваннях
+        if (typeof GlobalTerritoryFilter !== 'undefined') {
+          items = items.filter(a => GlobalTerritoryFilter.passes({
+            type: 'OFFICIAL_ALERT',
+            oblastKey: a.key || a.oblast || a.name,
+            oblastName: a.name || a.oblast,
+            apiRegion: a.oblast || a.name,
+            apiDistrict: a.district || null
+          }));
+        } else {
+          items = items.filter(a => FollowManager.matchesFollowed(a.name) || (a.oblast && FollowManager.matchesFollowed(a.oblast)));
+        }
       }
-    }
-
-    // Застосовуємо централізований територіальний фільтр до списку тривог
-    if (typeof GlobalTerritoryFilter !== 'undefined') {
-      items = items.filter(a => GlobalTerritoryFilter.passes({
-        type: 'OFFICIAL_ALERT',
-        oblastKey: a.key || a.oblast || a.name,
-        oblastName: a.name || a.oblast,
-        apiRegion: a.oblast || a.name,
-        apiDistrict: a.district || null
-      }));
+      // УВАГА: Якщо this.activeFilter === 'all' (режим «ВСІ»):
+      // показуємо ВСІ доступні офіційні тривоги з alerts.in.ua / NEPTUN по всій Україні!
+      // selectedTerritories до режиму «ВСІ» НЕ застосовується!
     }
 
     if (this.searchQuery) {
@@ -4229,9 +4305,9 @@ const AlertsService = {
     }
 
     // СОРТУВАННЯ ВКЛАДКИ «ТРИВОГИ»:
-    // Найновіші тривоги повинні завжди знаходитися на початку списку.
+    // В обох режимах: найновіша тривога -> старіша -> ще старіша.
     // Сортувати строго за реальним часом початку тривоги (started_at / since).
-    // Позиція завершених тривог також визначається часом початку started_at.
+    // Позиція завершених тривог також визначається початковим started_at.
     items.sort((a, b) => {
       const timeA = getAlertTimestamp(a);
       const timeB = getAlertTimestamp(b);
@@ -4807,6 +4883,7 @@ const UIController = {
     const layerAlerts    = document.getElementById('setting-layer-alerts');
     const layerThreats   = document.getElementById('setting-layer-threats');
     const animCheck      = document.getElementById('setting-enable-animations');
+    const mapApiKeyInput = document.getElementById('setting-map-api-key');
 
     // Фільтрація сповіщень за районами та областями
     const settingRegionSelect      = document.getElementById('setting-selected-region');
@@ -4929,6 +5006,7 @@ const UIController = {
       if (layerAlerts)     layerAlerts.checked     = s.layerAlerts;
       if (layerThreats)    layerThreats.checked    = s.layerThreats;
       if (animCheck)       animCheck.checked       = s.enableAnimations;
+      if (mapApiKeyInput)  mapApiKeyInput.value    = s.cartoApiKey || MapService.apiKey || '';
 
       // Персональна небезпека
       const geoOn = s.geoEnabled === true;
@@ -5080,9 +5158,11 @@ const UIController = {
         zoneOpacity:            parseFloat(opRange?.value || 0.35),
         layerAlerts:            layerAlerts?.checked !== false,
         layerThreats:           layerThreats?.checked !== false,
-        enableAnimations:       animCheck?.checked !== false
+        enableAnimations:       animCheck?.checked !== false,
+        cartoApiKey:            (mapApiKeyInput?.value || '').trim()
       };
       StorageManager.saveSettings(updated);
+      MapService.updateApiKey(updated.cartoApiKey);
       NavigationController.applyTabVisibility();
       AIService?.updateEnabledState();
       AIService?.render();
@@ -5599,7 +5679,8 @@ const StorageManager = {
     zoneOpacity:           0.35,
     layerAlerts:           true,
     layerThreats:          true,
-    enableAnimations:      true
+    enableAnimations:      true,
+    cartoApiKey:           ''
   },
 
   getSettings() {

@@ -427,24 +427,24 @@
     <!-- Панель фільтрів та швидкого пошуку -->
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pb-2.5 flex-shrink-0">
       
-      <!-- Фільтри категорій тривог -->
+      <!-- Фільтри категорій тривог: Всі (вся Україна) vs Вибрані області -->
       <div class="flex flex-wrap items-center bg-black/50 p-1 rounded-lg border border-white/15 text-xs font-mono gap-1">
-        <button id="alerts-filter-all" class="alerts-filter-btn active px-2.5 py-1 rounded font-semibold bg-red-600 text-white transition-colors" data-filter="all">
-          Всі (<span id="alerts-count-all">0</span>)
+        <button id="alerts-filter-all" class="alerts-filter-btn active px-2.5 py-1 rounded font-semibold bg-red-600 text-white transition-colors" data-filter="all" title="Показати всі офіційні тривоги по всій Україні">
+          Всі (Україна) (<span id="alerts-count-all">0</span>)
         </button>
-        <button id="alerts-filter-red" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="red">
+        <button id="alerts-filter-followed" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="followed" title="Показати тривоги тільки у вибраних областях та районах">
+          <svg class="w-3 h-3 text-amber-300" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Вибрані області (<span id="alerts-count-followed">0</span>)</span>
+        </button>
+        <button id="alerts-filter-red" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="red" title="Червоний рівень небезпеки">
           <span class="w-2 h-2 rounded-full bg-red-500"></span>
           <span>Червоний (<span id="alerts-count-red">0</span>)</span>
         </button>
-        <button id="alerts-filter-yellow" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="yellow">
+        <button id="alerts-filter-yellow" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="yellow" title="Жовтий рівень небезпеки">
           <span class="w-2 h-2 rounded-full bg-yellow-400"></span>
           <span>Жовтий (<span id="alerts-count-yellow">0</span>)</span>
         </button>
-        <button id="alerts-filter-followed" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="followed">
-          <svg class="w-3 h-3 text-amber-300" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-          <span>Мої території (<span id="alerts-count-followed">0</span>)</span>
-        </button>
-        <button id="alerts-filter-history" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="history">
+        <button id="alerts-filter-history" class="alerts-filter-btn px-2.5 py-1 rounded font-medium text-gray-300 hover:text-white transition-colors flex items-center gap-1" data-filter="history" title="Історія завершених тривог">
           <svg class="w-3 h-3 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
           <span>Відбої (<span id="alerts-count-history">0</span>)</span>
         </button>
@@ -1157,6 +1157,16 @@
             <span class="text-gray-300">Анімація пульсацій та радарів</span>
             <input id="setting-enable-animations" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
           </label>
+
+          <!-- Поле для введення API Key картографічного сервісу CARTO -->
+          <div class="p-2.5 rounded-lg bg-black/40 border border-white/10 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label for="setting-map-api-key" class="font-semibold text-gray-200">CARTO API Key</label>
+              <span class="text-[10px] font-mono text-gray-400">Тайли карти</span>
+            </div>
+            <input id="setting-map-api-key" type="password" autocomplete="off" placeholder="Введіть CARTO API Key..." class="w-full bg-black/60 border border-white/15 text-xs text-gray-100 rounded-lg px-2.5 py-1.5 outline-none focus:border-sky-400 font-mono" aria-label="CARTO API Key">
+            <p class="text-[10px] text-gray-400 leading-tight">Ключ доступу з carto.com/basemaps/apikey (або автоматично через .env: CARTO_API_KEY)</p>
+          </div>
         </div>
 
         <!-- Кнопки дій -->
