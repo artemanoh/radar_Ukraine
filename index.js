@@ -504,6 +504,126 @@ async function analyzeWithGemini(text, followedTerritories = [], apiKey) {
   });
 }
 
+/* ============================================================
+   ПРОКСІ-СЕРВІС ДЛЯ ALERTS.IN.UA (ОФІЦІЙНІ ТРИВОГИ)
+   Токен зберігається ТІЛЬКИ на сервері в process.env.ALERTS_IN_UA_TOKEN!
+   Клієнтський бандл ніколи не отримує секретний токен.
+============================================================ */
+let cachedAlertsInUa = null;
+let lastAlertsInUaFetch = 0;
+const ALERTS_IN_UA_CACHE_MS = 10000; // 10 секунд кеш для дотримання rate-limits
+
+function fetchAlertsInUaUpstream(token) {
+  return new Promise((resolve, reject) => {
+    const req = https.get('https://api.alerts.in.ua/v1/alerts/active.json', {
+      headers: {
+        'Authorization': `Bearer ${token.trim()}`,
+        'Accept': 'application/json',
+        'User-Agent': 'Radar-Airspace-Monitor/2.0'
+      },
+      timeout: 8000
+    }, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return reject(new Error(`alerts.in.ua HTTP ${res.statusCode}`));
+      }
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        try {
+          const buf = Buffer.concat(chunks);
+          resolve(JSON.parse(buf.toString('utf-8')));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('alerts.in.ua timeout'));
+    });
+  });
+}
+
+app.get('/api/v1/alerts-in-ua', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  const token = process.env.ALERTS_IN_UA_TOKEN;
+  if (!token || !token.trim()) {
+    return res.json({
+      status: 'no_token',
+      hasToken: false,
+      message: 'ALERTS_IN_UA_TOKEN не встановлено у .env. Використовуються дані NEPTUN.',
+      alerts: []
+    });
+  }
+
+  const now = Date.now();
+  if (cachedAlertsInUa && (now - lastAlertsInUaFetch < ALERTS_IN_UA_CACHE_MS)) {
+    return res.json({ ...cachedAlertsInUa, cached: true });
+  }
+
+  try {
+    const data = await fetchAlertsInUaUpstream(token);
+    cachedAlertsInUa = {
+      status: 'ok',
+      hasToken: true,
+      source: 'alerts.in.ua',
+      updatedAt: data.meta?.last_updated_at || new Date().toISOString(),
+      disclaimer: data.disclaimer || null,
+      alerts: Array.isArray(data.alerts) ? data.alerts : []
+    };
+    lastAlertsInUaFetch = now;
+    res.json(cachedAlertsInUa);
+  } catch (err) {
+    console.warn('[ALERTS.IN.UA] Помилка запиту:', err.message);
+    if (cachedAlertsInUa) {
+      return res.json({ ...cachedAlertsInUa, stale: true, error: err.message });
+    }
+    res.status(502).json({
+      status: 'error',
+      hasToken: true,
+      message: `Помилка зв'язку з alerts.in.ua: ${err.message}`,
+      alerts: []
+    });
+  }
+});
+
+/* ============================================================
+   КОНФІГУРАЦІЯ КАРТОГРАФІЧНОГО ПРОВАЙДЕРА (CARTO API)
+============================================================ */
+app.get('/api/v1/map-config', (req, res) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  const cartoKey = (process.env.CARTO_API_KEY || process.env.MAP_API_KEY || '').trim();
+  res.json({
+    status: 'ok',
+    provider: 'carto',
+    hasKey: Boolean(cartoKey),
+    apiKey: cartoKey
+  });
+});
+
+// Серверний проксі для тайлів карти (на випадок якщо ключ не повинен бути у браузері)
+app.get('/api/v1/map-tiles/:layer/:z/:x/:y.png', (req, res) => {
+  const { layer, z, x, y } = req.params;
+  const sanitizedLayer = layer === 'dark_only_labels' ? 'dark_only_labels' : 'dark_nolabels';
+  const cartoKey = (process.env.CARTO_API_KEY || process.env.MAP_API_KEY || '').trim();
+  const subdomains = ['a', 'b', 'c', 'd'];
+  const s = subdomains[Math.floor(Math.random() * subdomains.length)];
+  const keyParam = cartoKey ? `?key=${encodeURIComponent(cartoKey)}` : '';
+  const targetUrl = `https://${s}.basemaps.cartocdn.com/rastertiles/${sanitizedLayer}/${z}/${x}/${y}.png${keyParam}`;
+
+  https.get(targetUrl, (upstreamRes) => {
+    res.writeHead(upstreamRes.statusCode, {
+      'Content-Type': upstreamRes.headers['content-type'] || 'image/png',
+      'Cache-Control': upstreamRes.headers['cache-control'] || 'public, max-age=86400'
+    });
+    upstreamRes.pipe(res);
+  }).on('error', () => {
+    res.status(502).end();
+  });
+});
+
 // Статус аналітичного сервісу ШІ
 app.get('/api/v1/llm-status', (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
