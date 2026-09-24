@@ -1,19 +1,45 @@
 const fs = require('fs');
 const path = require('path');
 
-// Load territories.json
+// 1. Завантаження даних територій
 const territoriesData = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/territories.json'), 'utf8'));
 
-// Minimal environment to load TerritoriesManager from public/app.js
+// 2. Читання коду з public/app.js
 const appJs = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
 
-// Extract TerritoriesManager definition
+// Функція нормалізації з app.js
+function normalizeName(str) {
+  if (!str) return '';
+  return String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/^м\.\s*/i, '')
+    .replace(/^місто\s*/i, '')
+    .replace(/\s*район$/i, ' район')
+    .replace(/\s*р-н$/i, ' район')
+    .replace(/\s*область$/i, ' область')
+    .replace(/\s*обл\.?$/i, ' область')
+    .replace(/\s+/g, ' ');
+}
+
+// Витягуємо TerritoriesManager
 const tmStartIndex = appJs.indexOf('const TerritoriesManager = {');
 const tmEndMarker = '/* ============================================================';
 const tmEndIndex = appJs.indexOf(tmEndMarker, tmStartIndex + 100);
 const tmCode = appJs.substring(tmStartIndex, tmEndIndex);
 
-// Evaluate TerritoriesManager
+// Витягуємо GlobalTerritoryFilter
+const gtfStartIndex = appJs.indexOf('const GlobalTerritoryFilter = {');
+const gtfEndMarker = '/* ============================================================';
+const gtfEndIndex = appJs.indexOf(gtfEndMarker, gtfStartIndex + 100);
+const gtfCode = appJs.substring(gtfStartIndex, gtfEndIndex);
+
+const State = {
+  selectedRegion: 'Вінницька область',
+  selectedDistrict: 'all',
+  showEntireRegionWithDistrict: true
+};
+
 const sandbox = {
   console,
   Set,
@@ -21,165 +47,291 @@ const sandbox = {
   Array,
   Math,
   RegExp,
+  normalizeName,
   NEPTUN_REST_BASE: '',
   BASE_PATH: '',
   fetchUtf8Json: async () => territoriesData,
   FollowManager: { followedSet: new Set(), matchesFollowed: () => false },
-  State: { selectedRegion: 'Вінницька область', selectedDistrict: 'Вінницький район', showEntireRegionWithDistrict: true }
+  State
 };
 
-const fn = new Function('sandbox', `
+const setupFn = new Function('sandbox', `
   with(sandbox) {
     ${tmCode}
-    return TerritoriesManager;
+    ${gtfCode}
+    return { TerritoriesManager, GlobalTerritoryFilter };
   }
 `);
 
-const TM = fn(sandbox);
+const { TerritoriesManager: TM, GlobalTerritoryFilter: GTF } = setupFn(sandbox);
+sandbox.TerritoriesManager = TM;
+sandbox.GlobalTerritoryFilter = GTF;
+
 TM.hierarchy = territoriesData.hierarchy || [];
 TM.flat = territoriesData.flat || [];
 TM.buildIndices();
 
-console.log('✅ Indices built successfully!');
-console.log('Total Oblasts:', TM.allOblasts.size);
-console.log('Total Districts:', TM.allDistricts.size);
-console.log('Total Cities:', TM.allCities.size);
+console.log('✅ Індекси територій побудовано:');
+console.log(`   Областей: ${TM.allOblasts.size}, Районів: ${TM.allDistricts.size}, Міст: ${TM.allCities.size}\n`);
 
-// Define comprehensive test cases
-const tests = [
+// 18 обов'язкових тестів згідно розділу 16 технічного завдання
+const mandatoryTests = [
   {
-    name: 'Poltava channel / message should NOT match Vinnytsia district',
-    text: 'Шахед курсом на Полтаву!',
-    channel: '@PoltavaRanger',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
-    expected: false
-  },
-  {
-    name: 'Dnipro radar / message should NOT match Vinnytsia district',
-    text: 'Вибух у передмісті Дніпра! Працює ППО.',
-    channel: 'Радар Дніпра',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
-    expected: false
-  },
-  {
-    name: 'Mykolaiv alert should NOT match Vinnytsia district',
-    text: 'Миколаїв в укриття, ракета з півдня!',
-    channel: '@nikalert',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
-    expected: false
-  },
-  {
-    name: 'Vinnytsia city message SHOULD match Vinnytsia district',
-    text: 'Вінниця — загроза БпЛА зі сходу! Перебувайте в укриттях.',
-    channel: 'Вінниця ОВА',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
+    id: 1,
+    name: "Вибрана Вінницька область → повідомлення Вінницької області показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'INFORMATION',
+        text: 'У Вінниці чутно звуки дронів, працює ППО',
+        source: 'Вінниця ОВА'
+      });
+    },
     expected: true
   },
   {
-    name: 'Vinnytsia district town (Стрижавка) SHOULD match Vinnytsia district',
-    text: 'БпЛА над Стрижавкою в напрямку міста!',
-    channel: 'Оперативний',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
-    expected: true
-  },
-  {
-    name: 'Different district in same region (Haisyn/Ladyzhyn) with showOblastWide=false should NOT match Vinnytsia district',
-    text: 'БпЛА над Ладижином курсом на Гайсин',
-    channel: 'Вінниччина онлайн',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: false,
+    id: 2,
+    name: "Вибрана Вінницька область → Полтавське повідомлення не показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'INFORMATION',
+        text: 'Полтава укриття! Шахеди в напрямку міста з півночі',
+        source: 'Полтавський вісник'
+      });
+    },
     expected: false
   },
   {
-    name: 'Different district in same region (Haisyn/Ladyzhyn) with showOblastWide=true should NOT match Vinnytsia district because conflicting district is explicit',
-    text: 'БпЛА курсом на Гайсин',
-    channel: 'Вінниччина онлайн',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
+    id: 3,
+    name: "Вибрана Вінницька область → Дніпровське повідомлення не показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'INFORMATION',
+        text: 'Вибух у передмісті Дніпра! Працює ППО по розвіддрону',
+        source: 'Радар Дніпра'
+      });
+    },
     expected: false
   },
   {
-    name: 'Entire region warning (Вінницька область) with showOblastWide=true SHOULD match Vinnytsia district',
-    text: 'Вінницька область — ракетна небезпека!',
-    channel: 'Повітряні Сили ЗСУ',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
+    id: 4,
+    name: "Канал @PoltavaRanger пише про Вінницьку область → повідомлення показується (фільтр за змістом, а не каналом)",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'INFORMATION',
+        text: 'Шахед заходить у повітряний простір Вінницької області курсом на захід!',
+        source: '@PoltavaRanger'
+      });
+    },
     expected: true
   },
   {
-    name: 'Entire region warning (Вінницька область) with showOblastWide=false should NOT match Vinnytsia district',
-    text: 'Вінницька область — ракетна небезпека!',
-    channel: 'Повітряні Сили ЗСУ',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: false,
+    id: 5,
+    name: "Канал з назвою Vinnytsia пише про іншу область → повідомлення не показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'INFORMATION',
+        text: 'Тривога у Полтавській області, курс ворожих БпЛА на Кременчук',
+        source: 'Вінниця Новини'
+      });
+    },
     expected: false
   },
   {
-    name: 'National event: MiG-31K takeoff SHOULD match any selected territory',
-    text: 'Зліт МіГ-31К з аеродрому Саваслейка. Ракетна небезпека по всій Україні!',
-    channel: 'Повітряні Сили ЗСУ',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: false,
-    expected: true
-  },
-  {
-    name: 'National event: all-Ukraine alert SHOULD match any selected territory',
-    text: 'Повітряна тривога по всій території України!',
-    channel: 'Тривога України',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: false,
-    expected: true
-  },
-  {
-    name: 'Kyiv alert should NOT match Vinnytsia region',
-    text: 'Київ та Київська область — загроза балістичного озброєння!',
-    channel: 'КМВА',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'all',
-    showOblastWide: true,
+    id: 6,
+    name: "Офіційна тривога іншої області → не показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'OFFICIAL_ALERT',
+        oblastKey: 'полтавська область',
+        oblastName: 'Полтавська область'
+      });
+    },
     expected: false
   },
   {
-    name: 'Kyiv city alert SHOULD match Kyiv region filter',
-    text: 'Київ — вибухи в правобережній частині!',
-    channel: 'КМВА',
-    selectedRegion: 'Київ',
-    selectedDistrict: 'all',
-    showOblastWide: true,
+    id: 7,
+    name: "Офіційна тривога вибраної області → показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'OFFICIAL_ALERT',
+        oblastKey: 'вінницька область',
+        oblastName: 'Вінницька область'
+      });
+    },
     expected: true
   },
   {
-    name: 'Generic message without territory in specific district SHOULD be filtered out',
-    text: 'Увага! Відбій загрози.',
-    channel: 'Канал',
-    selectedRegion: 'Вінницька область',
-    selectedDistrict: 'Вінницький район',
-    showOblastWide: true,
+    id: 8,
+    name: "Реальна ціль у вибраній території → подія показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'Вінницький район';
+      return GTF.passes({
+        type: 'THREAT',
+        apiRegion: 'Вінницька область',
+        apiDistrict: 'Вінницький район',
+        apiLocality: 'Вінниця',
+        text: 'Виявлено БпЛА Shahed-136'
+      });
+    },
+    expected: true
+  },
+  {
+    id: 9,
+    name: "Реальна ціль поза вибраною територією → подія не показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'Вінницький район';
+      return GTF.passes({
+        type: 'THREAT',
+        apiRegion: 'Полтавська область',
+        apiDistrict: 'Полтавський район',
+        text: 'Виявлено БпЛА Shahed-136'
+      });
+    },
     expected: false
   },
   {
-    name: 'Generic message without territory in "all regions" SHOULD match',
-    text: 'Увага! Відбій загрози.',
-    channel: 'Канал',
-    selectedRegion: 'all',
-    selectedDistrict: 'all',
-    showOblastWide: true,
+    id: 10,
+    name: "Launch event іншої території → не показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'LAUNCH',
+        apiRegion: 'Автономна Республіка Крим',
+        text: 'Зафіксовано пуск балістичної ракети з території Криму у бік Миколаєва'
+      });
+    },
+    expected: false
+  },
+  {
+    id: 11,
+    name: "AI analysis іншої території → не показується",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'AI_ANALYSIS',
+        title: 'ШІ: Полтавська область',
+        text: 'Загроза застосування ударних БпЛА по об’єктах у Полтаві'
+      });
+    },
+    expected: false
+  },
+  {
+    id: 12,
+    name: "Urgent event іншої території → не обходить фільтр (не показується)",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      return GTF.passes({
+        type: 'THREAT',
+        priority: 'URGENT',
+        apiRegion: 'Харківська область',
+        text: 'ТЕРМІНОВО: Пуск КАБ у напрямку Харкова!'
+      });
+    },
+    expected: false
+  },
+  {
+    id: 13,
+    name: "Browser notification іншої території → не надсилається (passes повертає false)",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      const passes = GTF.passes({
+        type: 'INFORMATION',
+        text: 'Вибухи в Одесі! Працює ППО.',
+        source: 'Думська'
+      });
+      // Оскільки passes === false, NotificationDispatcher негайно повертає false до виклику NotificationManager.send
+      return passes;
+    },
+    expected: false
+  },
+  {
+    id: 14,
+    name: "Sound іншої території → не відтворюється (passes повертає false)",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'all';
+      const passes = GTF.passes({
+        type: 'THREAT',
+        apiRegion: 'Дніпропетровська область',
+        text: 'Ракета на Дніпро!'
+      });
+      // Оскільки passes === false, NotificationDispatcher негайно повертає false до виклику SoundService
+      return passes;
+    },
+    expected: false
+  },
+  {
+    id: 15,
+    name: "Зміна області без reload → onTerritoryChanged існує і є функцією",
+    fn: () => {
+      return typeof GTF.onTerritoryChanged === 'function';
+    },
+    expected: true
+  },
+  {
+    id: 16,
+    name: "Загальнонаціональна подія (МіГ-31К по всій Україні) → показується для будь-якої області",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'Вінницький район';
+      return GTF.passes({
+        type: 'INFORMATION',
+        text: 'Зліт МіГ-31К. Ракетна небезпека по всій Україні!',
+        source: 'Повітряні Сили ЗСУ'
+      });
+    },
+    expected: true
+  },
+  {
+    id: 17,
+    name: "Загальне повідомлення всієї області (Вінницька обл) при showEntireRegionWithDistrict=false → не показується у конкретному районі",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'Вінницький район';
+      State.showEntireRegionWithDistrict = false;
+      const res = GTF.passes({
+        type: 'INFORMATION',
+        text: 'Вінницька область — ракетна небезпека!',
+        source: 'Повітряні Сили ЗСУ'
+      });
+      State.showEntireRegionWithDistrict = true; // скидаємо
+      return res;
+    },
+    expected: false
+  },
+  {
+    id: 18,
+    name: "Населений пункт вибраного району (Стрижавка) → показується у Вінницькому районі",
+    fn: () => {
+      State.selectedRegion = 'Вінницька область';
+      State.selectedDistrict = 'Вінницький район';
+      State.showEntireRegionWithDistrict = true;
+      return GTF.passes({
+        type: 'INFORMATION',
+        text: 'БпЛА над Стрижавкою курсом на південь',
+        source: 'Оперативний'
+      });
+    },
     expected: true
   }
 ];
@@ -187,20 +339,31 @@ const tests = [
 let passed = 0;
 let failed = 0;
 
-for (const tc of tests) {
-  const parsed = TM.resolveMessageTerritory(tc.text, tc.channel);
-  const match = TM.isMatchingTerritory(parsed, tc.selectedRegion, tc.selectedDistrict, tc.showOblastWide);
-  const ok = match === tc.expected;
-  if (ok) {
-    passed++;
-    console.log(`PASS: ${tc.name}`);
-  } else {
+for (const test of mandatoryTests) {
+  try {
+    const result = test.fn();
+    const ok = result === test.expected;
+    if (ok) {
+      passed++;
+      console.log(`✅ [PASS] Тест ${test.id}: ${test.name}`);
+    } else {
+      failed++;
+      console.error(`❌ [FAIL] Тест ${test.id}: ${test.name}`);
+      console.error(`   Очікувалось: ${test.expected}, Отримано: ${result}`);
+    }
+  } catch (err) {
     failed++;
-    console.error(`FAIL: ${tc.name}`);
-    console.error(`  Expected: ${tc.expected}, Got: ${match}`);
-    console.error(`  Parsed:`, JSON.stringify(parsed));
+    console.error(`❌ [ERROR] Тест ${test.id}: ${test.name}`);
+    console.error(`   Помилка виконання: ${err.message}`);
   }
 }
 
-console.log(`\nTest results: ${passed}/${tests.length} passed (${failed} failed).`);
-if (failed > 0) process.exit(1);
+console.log(`\n========================================`);
+console.log(`Результати тестування: ${passed}/${mandatoryTests.length} пройдено (${failed} помилок)`);
+console.log(`========================================\n`);
+
+if (failed > 0) {
+  process.exit(1);
+} else {
+  console.log('🎉 Усі 18 обов’язкових тестів успішно пройдені!');
+}

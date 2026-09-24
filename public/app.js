@@ -1255,6 +1255,7 @@ const PollingService = {
 
       State.lastSyncTime  = new Date().toLocaleTimeString('uk-UA');
       State.lastSyncError = null;
+      AlertsInUaService.poll().catch(() => {});
     } catch (err) {
       State.lastSyncError = err.message;
       console.error('[REST FALLBACK] Помилка запиту:', err.message);
@@ -1268,6 +1269,49 @@ const PollingService = {
       if (MapService.currentSelectedLayer) {
         MapService.refreshSelectedDistrictPopup();
       }
+    }
+  }
+};
+
+/* ============================================================
+   7.1. ALERTS.IN.UA PROXY CLIENT (ОФІЦІЙНЕ ДЖЕРЕЛО ТРИВОГ)
+============================================================ */
+const AlertsInUaService = {
+  isConfigured: false,
+  lastSync: null,
+
+  async poll() {
+    try {
+      const res = await fetchUtf8Json('/api/v1/alerts-in-ua').catch(() => null);
+      if (!res) return;
+      if (res.status === 'no_token') {
+        this.isConfigured = false;
+        return;
+      }
+      if (res.status === 'ok' && res.data) {
+        this.isConfigured = true;
+        this.lastSync = new Date().toISOString();
+        this.processData(res.data);
+      }
+    } catch (e) {
+      // Non-blocking fallback
+    }
+  },
+
+  processData(data) {
+    if (!data || !Array.isArray(data.alerts)) return;
+    const active = data.alerts.filter(a => !a.finished_at);
+    if (active.length > 0 && AlertsService.activeAlerts.size === 0) {
+      const mockRaw = {
+        data: active.map(a => ({
+          name: a.location_title,
+          oblast: a.location_oblast || a.location_title,
+          since: a.started_at,
+          level: 'red',
+          reasons: [a.alert_type || 'Повітряна тривога']
+        }))
+      };
+      AlertsService.handleRealtimeAlerts(mockRaw);
     }
   }
 };
@@ -1299,6 +1343,8 @@ const TelegramFeedService = {
   analyzedCache: new Map(),
   llmEngine: 'local-nlp',
   hasApiKey: false,
+  unseenCount: 0,
+  userScrolledDown: false,
 
   async init() {
     this.loadStoredNotifications();
@@ -1367,12 +1413,21 @@ const TelegramFeedService = {
     } else {
       this.notifications.unshift(card);
       if (this.notifications.length > 250) this.notifications.pop();
+      if (this.userScrolledDown && NavigationController.currentTab === 'telegram') {
+        this.unseenCount++;
+        const newMsgBtn = document.getElementById('btn-tg-new-messages');
+        const countEl = document.getElementById('btn-tg-new-messages-count');
+        if (countEl) countEl.textContent = this.unseenCount;
+        newMsgBtn?.classList.remove('hidden');
+      }
     }
 
     this.saveNotifications();
     this.updateCounters();
     if (NavigationController.currentTab === 'telegram') {
-      this.render();
+      if (!this.userScrolledDown) {
+        this.render();
+      }
     }
   },
 
@@ -1534,6 +1589,29 @@ const TelegramFeedService = {
       GlobalTerritoryFilter.onTerritoryChanged();
       showToast('Фільтр території скинуто: Вся Україна');
     });
+
+    const messagesContainer = document.getElementById('tg-messages-list');
+    const newMsgBtn = document.getElementById('btn-tg-new-messages');
+    const newMsgCountEl = document.getElementById('btn-tg-new-messages-count');
+
+    if (messagesContainer) {
+      messagesContainer.addEventListener('scroll', () => {
+        this.userScrolledDown = messagesContainer.scrollTop > 60;
+        if (!this.userScrolledDown && this.unseenCount > 0) {
+          this.unseenCount = 0;
+          newMsgBtn?.classList.add('hidden');
+        }
+      }, { passive: true });
+    }
+
+    if (newMsgBtn) {
+      newMsgBtn.addEventListener('click', () => {
+        messagesContainer?.scrollTo({ top: 0, behavior: 'smooth' });
+        this.unseenCount = 0;
+        newMsgBtn.classList.add('hidden');
+        this.render();
+      });
+    }
   },
 
   async fetchLlmStatus() {
@@ -1605,7 +1683,16 @@ const TelegramFeedService = {
     this.saveNotifications();
     this.updateCounters();
     if (NavigationController.currentTab === 'telegram') {
-      this.render();
+      if (!this.userScrolledDown) {
+        this.render();
+      } else {
+        const newCount = Array.isArray(newMessages) && newMessages.length > 0 ? newMessages.length : 1;
+        this.unseenCount += newCount;
+        const newMsgBtn = document.getElementById('btn-tg-new-messages');
+        const countEl = document.getElementById('btn-tg-new-messages-count');
+        if (countEl) countEl.textContent = this.unseenCount;
+        newMsgBtn?.classList.remove('hidden');
+      }
     } else if (NavigationController.currentTab === 'ai') {
       AIService?.render();
     }
@@ -2289,18 +2376,25 @@ const NavigationController = {
       } catch (e) {}
     }
 
-    // Mobile buttons (горизонтально гортана панель)
-    document.querySelectorAll('.mobile-tab').forEach(b => {
-      b.classList.remove('active', 'bg-sky-600', 'text-white', 'shadow');
-      b.classList.add('text-gray-300', 'border-transparent');
+    // Mobile buttons (Floating Pill + FAB)
+    document.querySelectorAll('.floating-nav-pill .mobile-tab').forEach(b => {
+      b.classList.remove('active', 'bg-white/15', 'text-sky-300');
+      b.classList.add('text-gray-400');
     });
     const activeMobileBtn = document.getElementById(`m-tab-${tab}`);
-    if (activeMobileBtn) {
-      activeMobileBtn.classList.add('active', 'bg-sky-600', 'text-white', 'shadow');
-      activeMobileBtn.classList.remove('text-gray-300', 'border-transparent');
-      try {
-        activeMobileBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-      } catch (e) {}
+    if (activeMobileBtn && activeMobileBtn.closest('.floating-nav-pill')) {
+      activeMobileBtn.classList.add('active', 'bg-white/15', 'text-sky-300');
+      activeMobileBtn.classList.remove('text-gray-400');
+    }
+
+    // FAB AI button styling
+    const fabAi = document.getElementById('m-tab-ai');
+    if (fabAi) {
+      if (tab === 'ai') {
+        fabAi.classList.add('bg-purple-600', 'border-purple-300', 'shadow-[0_0_20px_rgba(168,85,247,0.6)]');
+      } else {
+        fabAi.classList.remove('bg-purple-600', 'border-purple-300', 'shadow-[0_0_20px_rgba(168,85,247,0.6)]');
+      }
     }
 
     const viewAlerts   = document.getElementById('view-alerts');
@@ -2373,9 +2467,26 @@ const MapService = {
       attributionControl: true
     });
 
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
-      maxZoom:     16
+    // 1. Створюємо окремий Leaflet pane для текстових підписів населених пунктів.
+    // zIndex: 450 розташовує підписи НАД кольоровими полігонами тривог (overlayPane має zIndex: 400),
+    // але ПІД тактичними маркерами цілей (markerPane має zIndex: 600).
+    const labelsPane = this.map.createPane('labels');
+    labelsPane.style.zIndex = 450;
+    labelsPane.style.pointerEvents = 'none';
+
+    // 2. Базовий темний картографічний шар (земля, вода, контури)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 16
+    }).addTo(this.map);
+
+    // 3. Шар підписів міст та населених пунктів України (Київ, Вінниця, Жмеринка, Літин, Хмільник тощо)
+    // Рендериться в labelsPane, тому ніколи не перекривається червоними/жовтими зонами тривог!
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd',
+      maxZoom: 16,
+      pane: 'labels'
     }).addTo(this.map);
 
     await Promise.all([
@@ -2392,11 +2503,15 @@ const MapService = {
     this.map.on('zoomend', () => this.updateMarkerScales());
     this.updateMarkerScales();
 
-    window.addEventListener('resize', () => {
+    const handleMapResize = () => {
       this.map?.invalidateSize();
       if (this.currentPopup && this.currentPopup.isOpen()) {
         this.ensurePopupVisible(this.currentPopup);
       }
+    };
+    window.addEventListener('resize', handleMapResize);
+    window.addEventListener('orientationchange', () => {
+      setTimeout(handleMapResize, 150);
     });
   },
 
@@ -3307,23 +3422,23 @@ const TerritoriesManager = {
     const localitiesFound = new Set();
 
     // 2. Строгі правила для спец-суб'єктів та частих міст (Київ, Севастополь, Дніпро):
-    const hasKyivOblast = /київськ[а-я]*\s+обл/i.test(t) || /київщин[а-я]*/i.test(t);
-    const hasKyivCity   = /(?:^|[^\p{L}\d_])ки[єїв][а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
+    const hasKyivOblast = /київськ\p{sc=Cyrillic}*\s+обл|київщин\p{sc=Cyrillic}*/iu.test(t);
+    const hasKyivCity   = /(?:^|[^\p{L}\d_])ки(?:їв|єв[аеуоі]|євом)(?:[^\p{L}\d_]|$)/iu.test(t);
     if (hasKyivOblast) oblastsFound.add('Київська область');
     if (hasKyivCity && !hasKyivOblast) {
       oblastsFound.add('Київ');
       localitiesFound.add('Київ');
     }
 
-    const hasCrimea     = /(?:^|[^\p{L}\d_])крим[а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
-    const hasSevastopol = /(?:^|[^\p{L}\d_])севастопол[а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
+    const hasCrimea     = /(?:^|[^\p{L}\d_])крим\p{sc=Cyrillic}*(?:[^\p{L}\d_]|$)/iu.test(t);
+    const hasSevastopol = /(?:^|[^\p{L}\d_])севастопол\p{sc=Cyrillic}*(?:[^\p{L}\d_]|$)/iu.test(t);
     if (hasCrimea) oblastsFound.add('Автономна Республіка Крим');
     if (hasSevastopol) {
       oblastsFound.add('Севастополь');
       localitiesFound.add('Севастополь');
     }
 
-    const hasDniproOblast = /дніпропетровськ[а-я]*\s+обл/i.test(t) || /дніпропетровщин[а-я]*/i.test(t);
+    const hasDniproOblast = /дніпропетровськ\p{sc=Cyrillic}*\s+обл|дніпропетровщин\p{sc=Cyrillic}*/iu.test(t);
     const hasDniproCity   = /(?:^|[^\p{L}\d_])дніпр[оаіеу][м]?(?:[^\p{L}\d_]|$)/iu.test(t);
     if (hasDniproOblast) oblastsFound.add('Дніпропетровська область');
     if (hasDniproCity) {
@@ -3332,66 +3447,60 @@ const TerritoriesManager = {
       oblastsFound.add('Дніпропетровська область');
     }
 
-    const hasVinnOblast   = /вінницьк[а-я]*\s+обл/i.test(t) || /вінниччин[а-я]*/i.test(t);
-    const hasVinnDistrict = /вінницьк[а-я]*\s+район/i.test(t);
+    const hasVinnOblast   = /вінницьк\p{sc=Cyrillic}*\s+обл|вінниччин\p{sc=Cyrillic}*/iu.test(t);
+    const hasVinnDistrict = /вінницьк\p{sc=Cyrillic}*\s+район/iu.test(t);
     const hasVinnCity     = /(?:^|[^\p{L}\d_])вінниц[яіеюь][ю]?(?:[^\p{L}\d_]|$)/iu.test(t);
     if (hasVinnOblast)   oblastsFound.add('Вінницька область');
     if (hasVinnDistrict) {
       districtsFound.add('Вінницький район');
       oblastsFound.add('Вінницька область');
     }
-    if (hasVinnCity) {
+    if (hasVinnCity && !hasVinnOblast && !hasVinnDistrict) {
       localitiesFound.add('Вінниця');
       districtsFound.add('Вінницький район');
       oblastsFound.add('Вінницька область');
     }
 
-    const hasPoltavaOblast   = /полтавськ[а-я]*\s+обл/i.test(t) || /полтавщин[а-я]*/i.test(t);
-    const hasPoltavaDistrict = /полтавськ[а-я]*\s+район/i.test(t);
+    const hasPoltavaOblast   = /полтавськ\p{sc=Cyrillic}*\s+обл|полтавщин\p{sc=Cyrillic}*/iu.test(t);
+    const hasPoltavaDistrict = /полтавськ\p{sc=Cyrillic}*\s+район/iu.test(t);
     const hasPoltavaCity     = /(?:^|[^\p{L}\d_])полтав[аіеуо][ю]?(?:[^\p{L}\d_]|$)/iu.test(t);
     if (hasPoltavaOblast)   oblastsFound.add('Полтавська область');
     if (hasPoltavaDistrict) {
       districtsFound.add('Полтавський район');
       oblastsFound.add('Полтавська область');
     }
-    if (hasPoltavaCity) {
+    if (hasPoltavaCity && !hasPoltavaOblast && !hasPoltavaDistrict) {
       localitiesFound.add('Полтава');
       districtsFound.add('Полтавський район');
       oblastsFound.add('Полтавська область');
     }
 
-    const hasMykOblast   = /миколаївськ[а-я]*\s+обл/i.test(t) || /миколаївщин[а-я]*/i.test(t);
-    const hasMykDistrict = /миколаївськ[а-я]*\s+район/i.test(t);
+    const hasMykOblast   = /миколаївськ\p{sc=Cyrillic}*\s+обл|миколаївщин\p{sc=Cyrillic}*/iu.test(t);
+    const hasMykDistrict = /миколаївськ\p{sc=Cyrillic}*\s+район/iu.test(t);
     const hasMykCity     = /(?:^|[^\p{L}\d_])микола[єїв][а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
     if (hasMykOblast)   oblastsFound.add('Миколаївська область');
     if (hasMykDistrict) {
       districtsFound.add('Миколаївський район');
       oblastsFound.add('Миколаївська область');
     }
-    if (hasMykCity) {
+    if (hasMykCity && !hasMykOblast && !hasMykDistrict) {
       localitiesFound.add('Миколаїв');
       districtsFound.add('Миколаївський район');
       oblastsFound.add('Миколаївська область');
     }
 
     // 3. Сканування населених пунктів за словником
-    // Якщо назва міста не закінчується на -ськ/-зьк/-цьк (не є прикметниковою основою),
-    // додаємо негативний lookahead щоб виключити збіг всередині прикметникових форм
-    // (напр. "Вінниця" не має матчитися в "Вінницька область").
     for (const city of this.allCities) {
       if (localitiesFound.has(city)) continue;
       const stem = city.replace(/район|область/gi, '').trim();
       if (stem.length < 3) continue;
       const baseStem = stem.length > 5 ? stem.slice(0, -1) : stem;
-      // Перевіряємо чи сама назва міста є прикметниковою (напр. Луцьк, Дрогобич не є)
       const hasSzkSuffix = /[сцз]ьк$/i.test(stem);
       let regex;
       if (hasSzkSuffix) {
-        // Місто типу "Луцьк" — стандартний regex
-        regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}[а-я]*(?:[^\\p{L}\\d_]|$)`, 'iu');
+        regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}\\p{sc=Cyrillic}*(?:[^\\p{L}\\d_]|$)`, 'iu');
       } else {
-        // Місто типу "Вінниця" — забороняємо прикметникові суфікси після основи
-        regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}(?![а-я]*[сцз]ьк)[а-я]*(?:[^\\p{L}\\d_]|$)`, 'iu');
+        regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}(?!\\p{sc=Cyrillic}*(?:ьк|[сцз]ьк|обл|район))\\p{sc=Cyrillic}*(?:[^\\p{L}\\d_]|$)`, 'iu');
       }
       if (regex.test(t)) {
         localitiesFound.add(city);
@@ -3407,7 +3516,7 @@ const TerritoriesManager = {
       if (districtsFound.has(dist)) continue;
       const stem = dist.replace(/район/gi, '').trim();
       const baseStem = stem.length > 5 ? stem.slice(0, -2) : stem;
-      const regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}[а-я]*\\s+район`, 'iu');
+      const regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}\\p{sc=Cyrillic}*\\s+(?:район|р-н)`, 'iu');
       if (regex.test(t)) {
         districtsFound.add(dist);
         const obl = this.districtOblastMap[dist];
@@ -3417,25 +3526,25 @@ const TerritoriesManager = {
 
     // 5. Сканування інших областей
     const oblastSuffixPatterns = [
-      { name: 'Волинська область', re: /волинськ[а-я]*\s+обл|волинь/i },
-      { name: 'Донецька область', re: /донецьк[а-я]*\s+обл|донеччин/i },
-      { name: 'Житомирська область', re: /житомирськ[а-я]*\s+обл|житомирщин/i },
-      { name: 'Закарпатська область', re: /закарпатськ[а-я]*\s+обл|закарпатт/i },
-      { name: 'Запорізька область', re: /запорізьк[а-я]*\s+обл|запоріжж/i },
-      { name: 'Івано-Франківська область', re: /івано-франківськ[а-я]*\s+обл|прикарпатт/i },
-      { name: 'Кіровоградська область', re: /кіровоградськ[а-я]*\s+обл|кропивниччин|кіровоградщин/i },
-      { name: 'Луганська область', re: /луганськ[а-я]*\s+обл|луганщин/i },
-      { name: 'Львівська область', re: /львівськ[а-я]*\s+обл|львівщин/i },
-      { name: 'Одеська область', re: /одеськ[а-я]*\s+обл|одещин/i },
-      { name: 'Рівненська область', re: /рівненськ[а-я]*\s+обл|рівненщин/i },
-      { name: 'Сумська область', re: /сумськ[а-я]*\s+обл|сумщин/i },
-      { name: 'Тернопільська область', re: /тернопільськ[а-я]*\s+обл|тернопільщин/i },
-      { name: 'Харківська область', re: /харківськ[а-я]*\s+обл|харківщин/i },
-      { name: 'Херсонська область', re: /херсонськ[а-я]*\s+обл|херсонщин/i },
-      { name: 'Хмельницька область', re: /хмельницьк[а-я]*\s+обл|хмельниччин/i },
-      { name: 'Черкаська область', re: /черкаськ[а-я]*\s+обл|черкащин/i },
-      { name: 'Чернівецька область', re: /чернівецьк[а-я]*\s+обл|буковин/i },
-      { name: 'Чернігівська область', re: /чернігівськ[а-я]*\s+обл|чернігівщин/i }
+      { name: 'Волинська область', re: /волинськ\p{sc=Cyrillic}*\s+обл|волинь/iu },
+      { name: 'Донецька область', re: /донецьк\p{sc=Cyrillic}*\s+обл|донеччин/iu },
+      { name: 'Житомирська область', re: /житомирськ\p{sc=Cyrillic}*\s+обл|житомирщин/iu },
+      { name: 'Закарпатська область', re: /закарпатськ\p{sc=Cyrillic}*\s+обл|закарпатт/iu },
+      { name: 'Запорізька область', re: /запорізьк\p{sc=Cyrillic}*\s+обл|запоріжж/iu },
+      { name: 'Івано-Франківська область', re: /івано-франківськ\p{sc=Cyrillic}*\s+обл|прикарпатт/iu },
+      { name: 'Кіровоградська область', re: /кіровоградськ\p{sc=Cyrillic}*\s+обл|кропивниччин|кіровоградщин/iu },
+      { name: 'Луганська область', re: /луганськ\p{sc=Cyrillic}*\s+обл|луганщин/iu },
+      { name: 'Львівська область', re: /львівськ\p{sc=Cyrillic}*\s+обл|львівщин/iu },
+      { name: 'Одеська область', re: /одеськ\p{sc=Cyrillic}*\s+обл|одещин/iu },
+      { name: 'Рівненська область', re: /рівненськ\p{sc=Cyrillic}*\s+обл|рівненщин/iu },
+      { name: 'Сумська область', re: /сумськ\p{sc=Cyrillic}*\s+обл|сумщин/iu },
+      { name: 'Тернопільська область', re: /тернопільськ\p{sc=Cyrillic}*\s+обл|тернопільщин/iu },
+      { name: 'Харківська область', re: /харківськ\p{sc=Cyrillic}*\s+обл|харківщин/iu },
+      { name: 'Херсонська область', re: /херсонськ\p{sc=Cyrillic}*\s+обл|херсонщин/iu },
+      { name: 'Хмельницька область', re: /хмельницьк\p{sc=Cyrillic}*\s+обл|хмельниччин/iu },
+      { name: 'Черкаська область', re: /черкаськ\p{sc=Cyrillic}*\s+обл|черкащин/iu },
+      { name: 'Чернівецька область', re: /чернівецьк\p{sc=Cyrillic}*\s+обл|буковин/iu },
+      { name: 'Чернігівська область', re: /чернігівськ\p{sc=Cyrillic}*\s+обл|чернігівщин/iu }
     ];
 
     for (const item of oblastSuffixPatterns) {
@@ -3690,12 +3799,38 @@ const GlobalTerritoryFilter = {
       const normSel  = normalizeName(sel);
       const normKey  = normalizeName(event.oblastKey  || '');
       const normName = normalizeName(event.oblastName || '');
-      // Пряме зіставлення: ключ API, назва API, або без суфікса "область"
       const normSelStripped = normSel.replace(/\s+область$/, '').trim();
-      return normKey  === normSel
+
+      const matchesOblast = normKey  === normSel
           || normName === normSel
           || normKey  === normSelStripped
-          || normName === normSelStripped;
+          || normName === normSelStripped
+          || (event.apiRegion && (normalizeName(event.apiRegion) === normSel || normalizeName(event.apiRegion) === normSelStripped));
+
+      if (!matchesOblast) return false;
+
+      // Якщо вибрано конкретний район
+      if (dist && dist !== 'all') {
+        const normDist = normalizeName(dist);
+        const normDistStripped = normDist.replace(/\s+район$/, '').trim();
+        const alertDist = event.apiDistrict ? normalizeName(event.apiDistrict) : '';
+
+        // Якщо в тривозі явно вказано район в окремому полі:
+        if (alertDist) {
+          return alertDist === normDist || alertDist === normDistStripped;
+        }
+
+        // Перевіряємо, чи в назві/ключі тривоги зазначено конкретний район:
+        const isDistrictAlert = normName.includes('район') || normKey.includes('район') || normKey.includes('::');
+        if (isDistrictAlert) {
+          return normName === normDist || normKey === normDist || normName.includes(normDistStripped) || normKey.includes(normDistStripped);
+        }
+
+        // Тривога на всю область: показуємо лише якщо користувач дозволив включати всю область
+        return State.showEntireRegionWithDistrict !== false;
+      }
+
+      return true;
     }
 
     // ── Реальні цілі та запуски (THREAT / LAUNCH) ──────────────────────────────
@@ -3769,13 +3904,25 @@ const GlobalTerritoryFilter = {
    12. ALERTS SERVICE — ОФІЦІЙНІ ТРИВОГИ (NEPTUN API)
    Повноцінний вертикальний скрол, реальний час since, фільтри за регіоном
 ============================================================ */
+function getAlertTimestamp(alert) {
+  if (!alert) return 0;
+  const s = alert.started_at || alert.since || alert.startTime;
+  if (!s) return 0;
+  const t = new Date(s).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
 const AlertsService = {
-  activeAlerts:  new Map(), // key -> alert object
-  alertsHistory: [],        // list of cleared alerts
-  activeFilter:  'all',      // 'all' | 'red' | 'yellow' | 'followed' | 'history'
-  searchQuery:   '',
+  activeAlerts:     new Map(), // key -> alert object
+  alertsHistory:    [],        // list of cleared alerts
+  activeFilter:     'all',      // 'all' | 'red' | 'yellow' | 'followed' | 'history'
+  searchQuery:      '',
+  userScrolledDown: false,
+  newAlertsCount:   0,
 
   init() {
+    this.loadStoredHistory();
+
     // Прив'язка кнопок фільтрів
     document.querySelectorAll('.alerts-filter-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -3810,6 +3957,53 @@ const AlertsService = {
     document.getElementById('stat-active-alerts')?.parentElement?.addEventListener('click', () => {
       NavigationController.switchTab('alerts');
     });
+
+    // Скрол та плаваюча кнопка "Нова тривога" (не стрибати вгору, якщо користувач читає старі)
+    const container = document.getElementById('alerts-list-container');
+    const newAlertBtn = document.getElementById('btn-alerts-new');
+    if (container) {
+      container.addEventListener('scroll', () => {
+        this.userScrolledDown = container.scrollTop > 60;
+        if (!this.userScrolledDown && this.newAlertsCount > 0) {
+          this.newAlertsCount = 0;
+          newAlertBtn?.classList.add('hidden');
+        }
+      }, { passive: true });
+    }
+
+    if (newAlertBtn) {
+      newAlertBtn.addEventListener('click', () => {
+        container?.scrollTo({ top: 0, behavior: 'smooth' });
+        this.newAlertsCount = 0;
+        newAlertBtn.classList.add('hidden');
+        this.render();
+      });
+    }
+
+    // Оновлення тривалості тривог у реальному часі кожні 30 секунд
+    setInterval(() => {
+      if (NavigationController?.currentTab === 'alerts' && this.activeAlerts.size > 0) {
+        this.render();
+      }
+    }, 30000);
+  },
+
+  loadStoredHistory() {
+    try {
+      const saved = localStorage.getItem('radar_alerts_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          this.alertsHistory = parsed;
+        }
+      }
+    } catch (e) {}
+  },
+
+  saveStoredHistory() {
+    try {
+      localStorage.setItem('radar_alerts_history', JSON.stringify(this.alertsHistory.slice(0, 150)));
+    } catch (e) {}
   },
 
   setFilter(filter) {
@@ -3836,45 +4030,52 @@ const AlertsService = {
     if (Array.isArray(rawAlerts.data)) {
       for (const item of rawAlerts.data) {
         if (!item) continue;
+        const startedAt = item.started_at || item.since || item.start_time || item.startTime || null;
         incomingUnits.push({
-          key:     item.key || (item.name || item.region || item.district || '').toLowerCase(),
-          name:    item.name || item.district || item.region || '',
-          oblast:  item.oblast || item.region || '',
-          since:   item.since || item.started_at,
-          level:   (item.level || item.alertLevel || 'red').toLowerCase(),
-          reasons: Array.isArray(item.reasons) ? item.reasons : (item.reason ? [item.reason] : [])
+          key:        item.key || (item.name || item.region || item.district || '').toLowerCase(),
+          name:       item.name || item.district || item.region || '',
+          oblast:     item.oblast || item.region || '',
+          started_at: startedAt,
+          since:      startedAt,
+          level:      (item.level || item.alertLevel || 'red').toLowerCase(),
+          reasons:    Array.isArray(item.reasons) ? item.reasons : (item.reason ? [item.reason] : [])
         });
       }
     } else {
       if (Array.isArray(rawAlerts.oblasts)) {
         for (const o of rawAlerts.oblasts) {
           if (!o) continue;
+          const startedAt = o.started_at || o.since || o.start_time || o.startTime || null;
           incomingUnits.push({
-            key:     o.key || o.name.toLowerCase(),
-            name:    o.name,
-            oblast:  o.oblast || o.name,
-            since:   o.since || o.started_at,
-            level:   (o.level || 'red').toLowerCase(),
-            reasons: o.reasons || []
+            key:        o.key || o.name.toLowerCase(),
+            name:       o.name,
+            oblast:     o.oblast || o.name,
+            started_at: startedAt,
+            since:      startedAt,
+            level:      (o.level || 'red').toLowerCase(),
+            reasons:    o.reasons || []
           });
         }
       }
       if (Array.isArray(rawAlerts.raions)) {
         for (const r of rawAlerts.raions) {
           if (!r) continue;
+          const startedAt = r.started_at || r.since || r.start_time || r.startTime || null;
           incomingUnits.push({
-            key:     r.key || `${r.name.toLowerCase()}::${(r.oblast || '').toLowerCase()}`,
-            name:    r.name,
-            oblast:  r.oblast || '',
-            since:   r.since || r.started_at,
-            level:   (r.level || 'red').toLowerCase(),
-            reasons: Array.isArray(r.reasons) ? r.reasons : (r.reason ? [r.reason] : [])
+            key:        r.key || `${r.name.toLowerCase()}::${(r.oblast || '').toLowerCase()}`,
+            name:       r.name,
+            oblast:     r.oblast || '',
+            started_at: startedAt,
+            since:      startedAt,
+            level:      (r.level || 'red').toLowerCase(),
+            reasons:    Array.isArray(r.reasons) ? r.reasons : (r.reason ? [r.reason] : [])
           });
         }
       }
     }
 
     const currentKeys = new Set();
+    let hasBrandNewAlert = false;
 
     for (const unit of incomingUnits) {
       if (!unit.name) continue;
@@ -3883,24 +4084,25 @@ const AlertsService = {
 
       const existing = this.activeAlerts.get(key);
       if (existing) {
-        // Оновлюємо статус і рівень, АЛЕ СУВОРО ЗБЕРІГАЄМО ПЕРВИННИЙ ЧАС since!
         existing.level   = unit.level;
         existing.reasons = unit.reasons;
         existing.oblast  = unit.oblast;
         existing.name    = unit.name;
-        if (unit.since && !existing.since) {
-          existing.since = unit.since;
+        if (unit.started_at && !existing.started_at) {
+          existing.started_at = unit.started_at;
+          existing.since      = unit.started_at;
         }
       } else {
-        // Нова тривога: використовуємо фактичне поле since з NEPTUN
+        hasBrandNewAlert = true;
         this.activeAlerts.set(key, {
           key,
-          name:    unit.name,
-          oblast:  unit.oblast,
-          since:   unit.since || rawAlerts.updatedAt || nowIso,
-          level:   unit.level,
-          reasons: unit.reasons,
-          status:  'active'
+          name:       unit.name,
+          oblast:     unit.oblast,
+          started_at: unit.started_at,
+          since:      unit.started_at,
+          level:      unit.level,
+          reasons:    unit.reasons,
+          status:     'active'
         });
       }
     }
@@ -3910,15 +4112,28 @@ const AlertsService = {
       if (!currentKeys.has(key)) {
         alert.status = 'cleared';
         alert.finishedAt = nowIso;
-        this.alertsHistory.unshift({ ...alert });
-        if (this.alertsHistory.length > 150) this.alertsHistory.pop();
+        const exists = this.alertsHistory.some(h => h.key === key && h.started_at === alert.started_at);
+        if (!exists) {
+          this.alertsHistory.unshift({ ...alert });
+          if (this.alertsHistory.length > 200) this.alertsHistory.pop();
+        }
         this.activeAlerts.delete(key);
       }
     }
 
+    this.saveStoredHistory();
     this.updateCounters();
+
     if (NavigationController.currentTab === 'alerts') {
-      this.render();
+      if (this.userScrolledDown && hasBrandNewAlert) {
+        this.newAlertsCount++;
+        const btn = document.getElementById('btn-alerts-new');
+        const countEl = document.getElementById('btn-alerts-new-count');
+        if (countEl) countEl.textContent = this.newAlertsCount;
+        btn?.classList.remove('hidden');
+      } else {
+        this.render();
+      }
     }
   },
 
@@ -3991,13 +4206,17 @@ const AlertsService = {
       } else if (this.activeFilter === 'followed') {
         items = items.filter(a => FollowManager.matchesFollowed(a.name) || (a.oblast && FollowManager.matchesFollowed(a.oblast)));
       }
+    }
 
-      // Сортування: найновіші зверху за фактичним часом since!
-      items.sort((a, b) => {
-        const timeA = a.since ? new Date(a.since).getTime() : 0;
-        const timeB = b.since ? new Date(b.since).getTime() : 0;
-        return timeB - timeA;
-      });
+    // Застосовуємо централізований територіальний фільтр до списку тривог
+    if (typeof GlobalTerritoryFilter !== 'undefined') {
+      items = items.filter(a => GlobalTerritoryFilter.passes({
+        type: 'OFFICIAL_ALERT',
+        oblastKey: a.key || a.oblast || a.name,
+        oblastName: a.name || a.oblast,
+        apiRegion: a.oblast || a.name,
+        apiDistrict: a.district || null
+      }));
     }
 
     if (this.searchQuery) {
@@ -4008,6 +4227,17 @@ const AlertsService = {
         (Array.isArray(a.reasons) && a.reasons.some(r => r.toLowerCase().includes(q)))
       );
     }
+
+    // СОРТУВАННЯ ВКЛАДКИ «ТРИВОГИ»:
+    // Найновіші тривоги повинні завжди знаходитися на початку списку.
+    // Сортувати строго за реальним часом початку тривоги (started_at / since).
+    // Позиція завершених тривог також визначається часом початку started_at.
+    items.sort((a, b) => {
+      const timeA = getAlertTimestamp(a);
+      const timeB = getAlertTimestamp(b);
+      if (timeB !== timeA) return timeB - timeA; // newest started_at first
+      return (a.name || '').localeCompare(b.name || ''); // deterministic fallback for same start time
+    });
 
     if (items.length === 0) {
       container.innerHTML = '';
@@ -4419,10 +4649,7 @@ const UIController = {
       if (setRegSelect) setRegSelect.value = State.selectedRegion;
 
       MapService.flyToRegion(State.selectedRegion);
-      FeedService.render();
-      TelegramFeedService.syncDistrictDropdown();
-      TelegramFeedService.render();
-      AIService?.render();
+      GlobalTerritoryFilter.onTerritoryChanged();
     });
 
     // Мобільна шторка панелі фільтрів (щоб карта не перекривалася на телефоні)
@@ -4826,8 +5053,7 @@ const UIController = {
       const tgReg = document.getElementById('tg-select-region');
       if (tgReg) tgReg.value = chosenRegion;
 
-      TelegramFeedService.syncDistrictDropdown();
-      TelegramFeedService.render();
+      GlobalTerritoryFilter.onTerritoryChanged();
 
       const updated = {
         notificationsEnabled:   notifCheck?.checked || false,
@@ -5090,6 +5316,19 @@ const SoundService = {
 };
 
 const NotificationManager = {
+  swRegistration: null,
+
+  async init() {
+    if ('serviceWorker' in navigator) {
+      try {
+        this.swRegistration = await navigator.serviceWorker.register('/sw.js');
+        console.log('[PWA] Service Worker успішно зареєстровано');
+      } catch (err) {
+        console.warn('[PWA] Не вдалося зареєструвати Service Worker:', err);
+      }
+    }
+  },
+
   async requestPermission() {
     if (!('Notification' in window)) return false;
     if (Notification.permission === 'granted') return true;
@@ -5102,14 +5341,19 @@ const NotificationManager = {
     if (!s.notificationsEnabled || SoundService.isQuietTime()) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     try {
-      new Notification(title, {
+      const options = {
         body,
         icon: isUrgent
           ? 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ef4444"><path d="M12 2L1 21h22L12 2zm0 3.5L20 19H4L12 5.5zM11 10v4h2v-4h-2zm0 6v2h2v-2h-2z"/></svg>'
           : 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%230284c7"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>',
         tag,
         requireInteraction: isUrgent
-      });
+      };
+      if (this.swRegistration && this.swRegistration.showNotification) {
+        this.swRegistration.showNotification(title, options);
+      } else {
+        new Notification(title, options);
+      }
     } catch (e) {}
   }
 };
@@ -5671,6 +5915,11 @@ const AIService = {
           <p class="text-xs text-purple-200 font-medium leading-relaxed">${escapeHtml(a.summary || '')}</p>
         </div>
 
+        <div class="px-2 py-1 rounded bg-purple-950/40 border border-purple-500/30 text-[10px] text-purple-300 font-mono flex items-center gap-1.5 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+          <span>Прогноз ШІ, не офіційний час завершення</span>
+        </div>
+
         <div class="flex flex-wrap items-center gap-1.5 mb-2.5">
           ${territories}
         </div>
@@ -5829,6 +6078,7 @@ function showToast(message, isUrgent = false) {
    СТАРТ СИСТЕМИ
 ============================================================ */
 document.addEventListener('DOMContentLoaded', async () => {
+  NotificationManager.init();
   NotificationDispatcher.init();
   SoundService.init();
   PersonalDangerService.init();
