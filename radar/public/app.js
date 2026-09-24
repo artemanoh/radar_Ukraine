@@ -2518,18 +2518,36 @@ const MapService = {
       attributionControl: true
     });
 
-    // Отримуємо API Key (з налаштувань localStorage або сервера через .env)
+    // Отримуємо API Key з надійних джерел:
+    // 1) Налаштування користувача (StorageManager)
+    // 2) Вбудований об'єкт window.__MAP_CONFIG__ або window.MAP_API_KEY
+    // 3) Серверний API endpoint (/api/v1/map-config)
+    // 4) Статичний файл конфігурації для GitHub Pages (BASE_PATH + 'map-config.json')
     let key = '';
     try {
       if (typeof StorageManager !== 'undefined') {
-        key = StorageManager.getSettings().cartoApiKey || '';
+        key = (StorageManager.getSettings().cartoApiKey || '').trim();
+      }
+      if (!key && typeof window !== 'undefined') {
+        if (window.__MAP_CONFIG__ && window.__MAP_CONFIG__.apiKey) {
+          key = String(window.__MAP_CONFIG__.apiKey).trim();
+        } else if (window.MAP_API_KEY) {
+          key = String(window.MAP_API_KEY).trim();
+        }
       }
       if (!key) {
         const cfg = await fetchUtf8Json('/api/v1/map-config').catch(() => null);
-        if (cfg && cfg.apiKey) key = cfg.apiKey.trim();
+        if (cfg && cfg.apiKey) key = String(cfg.apiKey).trim();
+      }
+      if (!key) {
+        const staticCfg = await fetchUtf8Json(`${BASE_PATH}map-config.json`).catch(() => null);
+        if (staticCfg && staticCfg.apiKey) key = String(staticCfg.apiKey).trim();
       }
     } catch (e) {}
+
+    this.defaultApiKey = key;
     this.apiKey = key;
+    console.info('[MapService] MAP_API_KEY configured:', Boolean(this.apiKey));
 
     const keyParam = this.apiKey ? `?key=${encodeURIComponent(this.apiKey)}` : '';
 
@@ -2586,7 +2604,7 @@ const MapService = {
   },
 
   updateApiKey(newKey) {
-    this.apiKey = (newKey || '').trim();
+    this.apiKey = (newKey || this.defaultApiKey || '').trim();
     const keyParam = this.apiKey ? `?key=${encodeURIComponent(this.apiKey)}` : '';
     if (this.baseTileLayer) {
       this.baseTileLayer.setUrl(`https://{s}.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}{r}.png${keyParam}`);

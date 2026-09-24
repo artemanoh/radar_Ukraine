@@ -9,6 +9,7 @@
  * - Validation of critical production assets
  */
 
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
@@ -66,11 +67,38 @@ if (fs.existsSync(indexPath)) {
   console.log('✅ Створено 404.html (fallback для прямої навігації)');
 }
 
+// 4.5. Генерація map-config.json для клієнтської карти (GitHub Pages / статичні хостинги)
+const cartoKey = (
+  process.env.CARTO_API_KEY ||
+  process.env.MAP_API_KEY ||
+  process.env.VITE_CARTO_API_KEY ||
+  process.env.VITE_MAP_API_KEY ||
+  ''
+).trim();
+
+const mapConfig = {
+  status: 'ok',
+  provider: 'carto',
+  hasKey: Boolean(cartoKey),
+  apiKey: cartoKey
+};
+
+fs.writeFileSync(path.join(DIST_DIR, 'map-config.json'), JSON.stringify(mapConfig, null, 2), 'utf8');
+if (fs.existsSync(SRC_DIR)) {
+  fs.writeFileSync(path.join(SRC_DIR, 'map-config.json'), JSON.stringify(mapConfig, null, 2), 'utf8');
+}
+const radarPublicDir = path.join(ROOT_DIR, 'radar', 'public');
+if (fs.existsSync(radarPublicDir)) {
+  fs.writeFileSync(path.join(radarPublicDir, 'map-config.json'), JSON.stringify(mapConfig, null, 2), 'utf8');
+}
+console.log(`🗺️  [BUILD] MAP_API_KEY configured: ${Boolean(cartoKey)} (map-config.json згенеровано)`);
+
 // 5. Валідація критичних файлів застосунку
 const requiredFiles = [
   'index.html',
   '404.html',
   '.nojekyll',
+  'map-config.json',
   'app.js',
   'style.css',
   'territories.json',
