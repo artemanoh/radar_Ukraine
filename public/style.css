@@ -21,7 +21,7 @@ body {
   padding: 0;
   background-color: #080b11;
   color: #f1f5f9;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
   user-select: none;
   -webkit-font-smoothing: antialiased;
 }
@@ -34,11 +34,11 @@ body {
 
 /* Ефект Liquid Glass */
 .liquid-glass {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow);
+  background: rgba(14, 18, 27, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
   transition: all 0.25s ease;
 }
 
@@ -544,4 +544,139 @@ body.fullscreen-radar #main-header {
   border-color: rgba(239, 68, 68, 0.9);
   background: rgba(220, 38, 38, 0.25);
   box-shadow: 0 8px 30px rgba(239, 68, 68, 0.35);
+}
+
+/* ============================================================
+   iOS LIQUID GLASS & BOTTOM SHEET SYSTEM
+============================================================ */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .ios-safe-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+  }
+  .ios-safe-top {
+    padding-top: max(0.5rem, env(safe-area-inset-top)) !important;
+  }
+}
+
+/* User Location Marker (Pulse Dot) */
+.user-location-marker {
+  position: relative;
+  width: 20px;
+  height: 20px;
+}
+.user-location-dot {
+  width: 14px;
+  height: 14px;
+  background: #0ea5e9;
+  border: 2.5px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.9);
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  z-index: 2;
+}
+.user-location-pulse {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  top: -8px;
+  left: -8px;
+  background: rgba(56, 189, 248, 0.35);
+  border-radius: 50%;
+  animation: user-pulse 2s infinite ease-out;
+  pointer-events: none;
+}
+@keyframes user-pulse {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+/* iOS Bottom Sheet (Mobile Dialogs) */
+@media (max-width: 639px) {
+  .ios-bottom-sheet-container {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  .ios-bottom-sheet-panel {
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-top-left-radius: 1.5rem !important;
+    border-top-right-radius: 1.5rem !important;
+    max-height: 88vh !important;
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom)) !important;
+    animation: slideUpSheet 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+  .sheet-pull-handle {
+    display: block !important;
+    width: 36px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.28);
+    border-radius: 9999px;
+    margin: 0 auto 0.75rem auto;
+  }
+}
+
+@keyframes slideUpSheet {
+  from {
+    transform: translateY(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Personal Danger Indicator Badges */
+.personal-danger-high {
+  background: rgba(220, 38, 38, 0.22) !important;
+  border-color: rgba(239, 68, 68, 0.85) !important;
+  color: #fca5a5 !important;
+  animation: pulse-border 1.5s infinite;
+}
+.personal-danger-elevated {
+  background: rgba(217, 119, 6, 0.22) !important;
+  border-color: rgba(245, 158, 11, 0.75) !important;
+  color: #fcd34d !important;
+}
+.personal-danger-normal {
+  background: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.45) !important;
+  color: #6ee7b7 !important;
+}
+
+/* Mobile Left Panel Drawer */
+@media (max-width: 639px) {
+  #left-panel.mobile-open {
+    display: flex !important;
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    max-height: 82vh !important;
+    border-radius: 1.5rem 1.5rem 0 0 !important;
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom)) !important;
+    z-index: 45 !important;
+    box-shadow: 0 -12px 35px rgba(0, 0, 0, 0.85) !important;
+    animation: slideUpSheet 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+}
+
+/* Ensure no horizontal overflow on swipe */
+html, body {
+  overflow-x: hidden !important;
+  max-width: 100vw !important;
 }

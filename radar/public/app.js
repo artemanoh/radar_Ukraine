@@ -9,7 +9,7 @@
  * 4. Моніторинг та відстеження Вінницької області (та інших обраних територій).
  * 5. Сповіщення ТІЛЬКИ при реальній зміні офіційного статусу тривоги (inactive ↔ yellow ↔ red).
  * 6. Інформаційна стрічка Telegram (/api/v1/messages) з фільтрацією по Вінницькій області.
- * 7. Чітке візуальне розділення: 🔴 Офіційна тривога vs 📰 Інформаційне повідомлення.
+ * 7. Чітке візуальне розділення: Офіційна тривога vs Інформаційне повідомлення.
  * 8. Обробка areaOnly: true для загроз (орієнтовний район, без вигаданих курсів).
  * 9. Налаштування сповіщень (офіційні тривоги, інформаційні повідомлення, звук, нічний режим).
  * 10. Чисте UTF-8 декодування з автоматичним виправленням Windows-1251 mojibake.
@@ -340,7 +340,9 @@ const State = {
   lastSyncError: null,
   activeFilter:  'all',
   statusFilter:  'active',
-  selectedRegion:'all'
+  selectedRegion: localStorage.getItem('radar_selected_region') || 'all',
+  selectedDistrict: localStorage.getItem('radar_selected_district') || 'all',
+  showEntireRegionWithDistrict: localStorage.getItem('radar_show_oblast_wide') !== 'false'
 };
 
 const NOTIFICATIONS_STORAGE_KEY = 'radar_notifications_history_v3';
@@ -442,6 +444,29 @@ const NotificationDispatcher = {
       return false;
     }
 
+    // 4.1. Глобальна перевірка відповідності вибраній території
+    //      Єдина централізована точка фільтрації для ВСІХ типів сповіщень.
+    //      URGENT не обходить цей фільтр — пріоритет події ≠ дозвіл ігнорувати налаштування.
+    if (typeof GlobalTerritoryFilter !== 'undefined') {
+      const rawObj = raw || {};
+      if (!GlobalTerritoryFilter.passes({
+        type,
+        oblastKey:    rawObj.key      || rawObj.oblast || place,
+        oblastName:   rawObj.name     || rawObj.oblast || place,
+        apiRegion:    rawObj.region   || rawObj.oblast || null,
+        apiDistrict:  rawObj.district || null,
+        apiLocality:  rawObj.locality || null,
+        areaOnly:     rawObj.areaOnly || false,
+        text:         body,
+        title,
+        source,
+        place,
+        parsedTerritory: rawObj._parsedTerritory || null
+      })) {
+        return false;
+      }
+    }
+
     // 5. Визначення та повага до пріоритету URGENT
     let effectivePriority = priority;
     if (s.urgentAlertsEnabled === false && effectivePriority === NOTIFICATION_PRIORITIES.URGENT) {
@@ -464,12 +489,12 @@ const NotificationDispatcher = {
 
     // 7. Браузерні сповіщення (Push API)
     if (s.notificationsEnabled) {
-      const pushTitle = isUrgent ? `🚨 ТЕРМІНОВО: ${title}` : title;
+      const pushTitle = isUrgent ? `[ТЕРМІНОВО] ${title}` : title;
       NotificationManager.send(pushTitle, body, id, isUrgent);
     }
 
     // 8. Інтерфейсний Toast
-    const toastTitle = isUrgent ? `🚨 ТЕРМІНОВО: ${title}` : title;
+    const toastTitle = isUrgent ? `[ТЕРМІНОВО] ${title}` : title;
     showToast(toastTitle, isUrgent);
 
     // 9. Додавання картки у стрічку сповіщень (ОДНЕ сповіщення, без дублювання)
@@ -773,13 +798,14 @@ const ChangeDetector = {
           id: eventId,
           type: NOTIFICATION_CATEGORIES.OFFICIAL_ALERT,
           priority: NOTIFICATION_PRIORITIES.NORMAL,
-          title: `✅ Відбій тривоги: ${place}`,
+          title: `Відбій тривоги: ${place}`,
           body: 'Повітряний простір спокійний',
           place,
           eventTime: item.since || null,
           source: 'NEPTUN API',
           level: 'green',
-          isClear: true
+          isClear: true,
+          raw: { key: item.key || place, name: item.name || place, oblast: item.oblast || place }
         });
 
         FeedService.addEvent({
@@ -800,7 +826,6 @@ const ChangeDetector = {
       const lvlUpper = lvl.toUpperCase();
       const isYellow = lvl === 'yellow';
       const isUrgent = lvl === 'red';
-      const icon = isYellow ? '🟡' : '🔴';
       const levelTitle = isYellow ? 'зафіксовано офіційний жовтий рівень' : 'оголошено повітряну тривогу';
       const eventId = `alert_active_${item.key || place}_${item.since || 'init'}`;
       const exactStartTime = item.since ? new Date(item.since).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : timeStr;
@@ -822,12 +847,13 @@ const ChangeDetector = {
           id: eventId,
           type: NOTIFICATION_CATEGORIES.OFFICIAL_ALERT,
           priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
-          title: `${icon} ${place}: ${levelTitle}`,
+          title: `Тривога [${lvlUpper}]: ${place}`,
           body: item.reasons?.join(', ') || `Офіційний стан тривоги [${lvlUpper}]`,
           place,
           eventTime: item.since || null,
           source: 'NEPTUN API',
-          level: item.level || 'red'
+          level: item.level || 'red',
+          raw: { key: item.key || place, name: item.name || place, oblast: item.oblast || place }
         });
 
         FeedService.addEvent({
@@ -855,12 +881,13 @@ const ChangeDetector = {
           id: eventId,
           type: NOTIFICATION_CATEGORIES.OFFICIAL_ALERT,
           priority: isEscalation ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
-          title: `⚠️ Зміна рівня тривоги: ${place}`,
+          title: `Зміна рівня тривоги: ${place}`,
           body: `Офіційний рівень змінено: ${prev.level.toUpperCase()} → ${newLvl}`,
           place,
           eventTime: unit.since || null,
           source: 'NEPTUN API',
-          level: unit.level
+          level: unit.level,
+          raw: { key: unit.key || place, name: unit.name || place, oblast: unit.oblast || place }
         });
 
         FeedService.addEvent({
@@ -934,17 +961,31 @@ const ChangeDetector = {
       const eventId     = `threat_detect_${t.id}`;
       const category    = isLaunch ? NOTIFICATION_CATEGORIES.LAUNCH : NOTIFICATION_CATEGORIES.THREAT;
 
+      // Будуємо parsedTerritory заздалегідь із реальних полів API (region/district/locality)
+      // щоб GlobalTerritoryFilter використовував точні дані, а не NLP-здогад.
+      const threatPlace = [t.locality, t.district, t.region].filter(Boolean).join(' ');
+      const threatParsed = (typeof TerritoriesManager !== 'undefined' && threatPlace)
+        ? TerritoriesManager.resolveMessageTerritory(threatPlace, 'NEPTUN API')
+        : null;
+
       NotificationDispatcher.dispatch({
         id: eventId,
         type: category,
         priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
-        title: isLaunch ? `🚀 ЗАПУСК / ЗАГРОЗА (${typeLabel})` : `🟠 ЗАГРОЗА (${typeLabel})`,
+        title: isLaunch ? `ЗАПУСК / ЗАГРОЗА (${typeLabel})` : `ЗАГРОЗА (${typeLabel})`,
         body: t.explanation || `Виявлено ціль (${typeLabel}) у районі ${place}`,
         place,
         eventTime: t.time || t.updatedAt || t.timestamp || null,
         source: 'NEPTUN API',
         subtype: t.type || 'drone',
-        raw: t
+        raw: {
+          ...t,
+          region:          t.region   || null,
+          district:        t.district || null,
+          locality:        t.locality || null,
+          areaOnly:        t.areaOnly || false,
+          _parsedTerritory: threatParsed
+        }
       });
 
       FeedService.addEvent({
@@ -969,6 +1010,9 @@ const ChangeDetector = {
         isOfficial: false
       });
     }
+
+    // Оцінка персональної безпеки при зміні цілей
+    PersonalDangerService?.evaluate();
   }
 };
 
@@ -1002,7 +1046,7 @@ const RealtimeClient = {
     }
 
     this.ws.onopen = () => {
-      console.info('⚡ [NEPTUN WS] Підключено до wss://neptun.in.ua/api/v1/stream');
+      console.info('[NEPTUN WS] Підключено до wss://neptun.in.ua/api/v1/stream');
       this.isWsConnected = true;
       this.reconnectAttempts = 0;
       this.lastHeartbeatTime = Date.now();
@@ -1087,6 +1131,7 @@ const RealtimeClient = {
             State.threats.set(threat.id, threat);
             MapService.updateThreat(threat);
             UIController.updateCounters();
+            PersonalDangerService?.evaluate();
           }
         }
         break;
@@ -1097,6 +1142,7 @@ const RealtimeClient = {
           State.threats.delete(removeId);
           MapService.removeThreat(removeId);
           UIController.updateCounters();
+          PersonalDangerService?.evaluate();
         }
         break;
 
@@ -1130,7 +1176,7 @@ const RealtimeClient = {
 
   startRestFallback() {
     if (this.fallbackPollingTimer) return;
-    console.info('🔄 [REST FALLBACK] Активовано резервне 5-секундне опитування');
+    console.info('[REST FALLBACK] Активовано резервне 5-секундне опитування');
     PollingService.poll();
     this.fallbackPollingTimer = setInterval(() => {
       if (this.isWsConnected) {
@@ -1145,7 +1191,7 @@ const RealtimeClient = {
     if (this.fallbackPollingTimer) {
       clearInterval(this.fallbackPollingTimer);
       this.fallbackPollingTimer = null;
-      console.info('🛑 [REST FALLBACK] Зупинено — WebSocket активний');
+      console.info('[REST FALLBACK] Зупинено — WebSocket активний');
     }
   },
 
@@ -1288,21 +1334,32 @@ const TelegramFeedService = {
     if (!notifData || !notifData.id) return;
     const existingIdx = this.notifications.findIndex(n => n.id === notifData.id || (n.sourceId && n.sourceId === notifData.id));
 
+    let parsed = notifData.parsedTerritory;
+    if (!parsed && window.TerritoriesManager && typeof TerritoriesManager.resolveMessageTerritory === 'function') {
+      const combined = `${notifData.title || ''} ${notifData.message || ''} ${notifData.territory || ''}`;
+      parsed = TerritoriesManager.resolveMessageTerritory(combined, notifData.source || '');
+    }
+
     const card = {
-      id:         notifData.id,
-      type:       notifData.type,
-      priority:   notifData.priority || 'NORMAL',
-      territory:  notifData.territory || '',
-      title:      notifData.title || '',
-      message:    notifData.message || '',
-      eventTime:  notifData.eventTime || null,
-      receivedAt: notifData.receivedAt || new Date().toISOString(),
-      source:     notifData.source || 'NEPTUN API',
-      sourceId:   notifData.sourceId || notifData.id,
-      level:      notifData.level || 'red',
-      subtype:    notifData.subtype || '',
-      status:     notifData.status || 'АКТИВНА',
-      raw:        notifData.raw || null
+      id:                  notifData.id,
+      type:                notifData.type,
+      priority:            notifData.priority || 'NORMAL',
+      territory:           notifData.territory || (parsed?.primaryPlace || ''),
+      territories:         notifData.territories || (parsed?.territories || { country: 'Україна', oblasts: [], districts: [], localities: [] }),
+      isNational:          notifData.isNational !== undefined ? notifData.isNational : (parsed?.isNational || false),
+      territoryConfidence: notifData.territoryConfidence || (parsed?.confidence || 0),
+      territorySource:     notifData.territorySource || (parsed?.source || 'message_text'),
+      parsedTerritory:     parsed || null,
+      title:               notifData.title || '',
+      message:             notifData.message || '',
+      eventTime:           notifData.eventTime || null,
+      receivedAt:          notifData.receivedAt || new Date().toISOString(),
+      source:              notifData.source || 'NEPTUN API',
+      sourceId:            notifData.sourceId || notifData.id,
+      level:               notifData.level || 'red',
+      subtype:             notifData.subtype || '',
+      status:              notifData.status || 'АКТИВНА',
+      raw:                 notifData.raw || null
     };
 
     if (existingIdx >= 0) {
@@ -1424,10 +1481,60 @@ const TelegramFeedService = {
       this.render();
     });
 
+    const tgRegionSelect   = document.getElementById('tg-select-region');
+    const tgDistrictSelect = document.getElementById('tg-select-district');
+    const tgIncludeOblast  = document.getElementById('tg-check-include-oblast');
+
+    tgRegionSelect?.addEventListener('change', (e) => {
+      State.selectedRegion = e.target.value;
+      State.selectedDistrict = 'all';
+      localStorage.setItem('radar_selected_region', State.selectedRegion);
+      localStorage.setItem('radar_selected_district', 'all');
+
+      const selMain = document.getElementById('select-region');
+      if (selMain) selMain.value = State.selectedRegion;
+      const selSettings = document.getElementById('setting-selected-region');
+      if (selSettings) selSettings.value = State.selectedRegion;
+
+      this.syncDistrictDropdown();
+      this.render();
+      AIService?.render();
+      showToast(`Фільтр сповіщень: ${State.selectedRegion === 'all' ? 'Вся Україна' : State.selectedRegion}`);
+    });
+
+    tgDistrictSelect?.addEventListener('change', (e) => {
+      State.selectedDistrict = e.target.value;
+      localStorage.setItem('radar_selected_district', State.selectedDistrict);
+      const selDistSettings = document.getElementById('setting-selected-district');
+      if (selDistSettings) selDistSettings.value = State.selectedDistrict;
+
+      this.render();
+      AIService?.render();
+      showToast(`Фільтр району: ${State.selectedDistrict === 'all' ? 'Усі райони' : State.selectedDistrict}`);
+    });
+
+    tgIncludeOblast?.addEventListener('change', (e) => {
+      State.showEntireRegionWithDistrict = e.target.checked;
+      localStorage.setItem('radar_show_oblast_wide', State.showEntireRegionWithDistrict);
+      const checkSettings = document.getElementById('setting-show-oblast-wide');
+      if (checkSettings) checkSettings.checked = State.showEntireRegionWithDistrict;
+
+      this.render();
+    });
+
     document.getElementById('tg-btn-reset-region')?.addEventListener('click', () => {
       State.selectedRegion = 'all';
-      const sel = document.getElementById('select-region');
-      if (sel) sel.value = 'all';
+      State.selectedDistrict = 'all';
+      localStorage.setItem('radar_selected_region', 'all');
+      localStorage.setItem('radar_selected_district', 'all');
+
+      const selMain = document.getElementById('select-region');
+      if (selMain) selMain.value = 'all';
+      if (tgRegionSelect) tgRegionSelect.value = 'all';
+      const selSettings = document.getElementById('setting-selected-region');
+      if (selSettings) selSettings.value = 'all';
+
+      this.syncDistrictDropdown();
       this.render();
       AIService?.render();
       showToast('Фільтр території скинуто: Вся Україна');
@@ -1465,17 +1572,27 @@ const TelegramFeedService = {
       const existingNotif = this.notifications.find(n => n.id === `msg_${key}` || n.sourceId === msg.id);
 
       if (!existingNotif) {
+        let parsed = null;
+        if (window.TerritoriesManager && typeof TerritoriesManager.resolveMessageTerritory === 'function') {
+          parsed = TerritoriesManager.resolveMessageTerritory(msg.text || '', msg.channel || '');
+        }
+
         const notif = {
-          id:         `msg_${key}`,
-          type:       'message',
-          territory:  '',
-          title:      msg.channel || 'Telegram',
-          message:    msg.text || '',
-          eventTime:  msg.date || null, // Точний час з API
-          receivedAt: new Date().toISOString(),
-          source:     msg.channel || 'Telegram',
-          sourceId:   msg.id || key,
-          rawMsg:     msg
+          id:                  `msg_${key}`,
+          type:                'message',
+          territory:           parsed?.primaryPlace || '',
+          territories:         parsed?.territories || { country: 'Україна', oblasts: [], districts: [], localities: [] },
+          isNational:          parsed?.isNational || false,
+          territoryConfidence: parsed?.confidence || 0,
+          territorySource:     parsed?.source || 'message_text',
+          parsedTerritory:     parsed || null,
+          title:               msg.channel || 'Telegram',
+          message:             msg.text || '',
+          eventTime:           msg.date || null, // Точний час з API
+          receivedAt:          new Date().toISOString(),
+          source:              msg.channel || 'Telegram',
+          sourceId:            msg.id || key,
+          rawMsg:              msg
         };
         this.notifications.unshift(notif);
       }
@@ -1573,7 +1690,7 @@ const TelegramFeedService = {
             id: `ai_analysis_${key}`,
             type: NOTIFICATION_CATEGORIES.AI_ANALYSIS,
             priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
-            title: `🧠 ШІ: ${(analysis.territories || []).join(', ') || 'Аналіз загрози'}`,
+            title: `ШІ: ${(analysis.territories || []).join(', ') || 'Аналіз загрози'}`,
             body: analysis.summary || '',
             place: primaryTerritory,
             eventTime: msg.date || null,
@@ -1627,61 +1744,90 @@ const TelegramFeedService = {
     }
   },
 
+  syncDistrictDropdown() {
+    const regSelect = document.getElementById('tg-select-region');
+    const distSelect = document.getElementById('tg-select-district');
+    const labelInclude = document.getElementById('tg-label-include-oblast');
+    const checkInclude = document.getElementById('tg-check-include-oblast');
+    const resetBtn = document.getElementById('tg-btn-reset-region');
+
+    if (regSelect) regSelect.value = State.selectedRegion || 'all';
+
+    const isSpecificRegion = State.selectedRegion && State.selectedRegion !== 'all';
+
+    if (distSelect) {
+      if (isSpecificRegion) {
+        distSelect.classList.remove('hidden');
+        const districts = (window.TerritoriesManager && typeof TerritoriesManager.getDistrictsForOblast === 'function')
+          ? TerritoriesManager.getDistrictsForOblast(State.selectedRegion)
+          : [];
+        
+        distSelect.innerHTML = `<option value="all">Усі райони (${State.selectedRegion})</option>` +
+          districts.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+        
+        distSelect.value = State.selectedDistrict || 'all';
+      } else {
+        distSelect.classList.add('hidden');
+        distSelect.innerHTML = `<option value="all">Усі райони</option>`;
+      }
+    }
+
+    if (labelInclude) {
+      labelInclude.classList.toggle('hidden', !isSpecificRegion);
+      labelInclude.classList.toggle('flex', isSpecificRegion);
+    }
+    if (checkInclude) {
+      checkInclude.checked = State.showEntireRegionWithDistrict !== false;
+    }
+    if (resetBtn) {
+      const isFiltered = isSpecificRegion || (State.selectedDistrict && State.selectedDistrict !== 'all');
+      resetBtn.classList.toggle('hidden', !isFiltered);
+    }
+  },
+
   matchesRegion(n) {
     if (!State.selectedRegion || State.selectedRegion === 'all') return true;
-    const sel = State.selectedRegion.toLowerCase();
-    
-    // Прямий збіг у territory
-    const t = (n.territory || '').toLowerCase();
-    if (t.includes(sel) || sel.includes(t)) return true;
 
-    // Перевірка в заголовку або тексті
-    const title = (n.title || '').toLowerCase();
-    const msg = (n.message || '').toLowerCase();
-    if (title.includes(sel) || msg.includes(sel)) return true;
-
-    // Перевірка районів та міст обраної області через TerritoriesManager
-    if (TerritoriesManager && TerritoriesManager.oblastDistrictsMap) {
-      const districts = TerritoriesManager.oblastDistrictsMap[State.selectedRegion] || [];
-      for (const d of districts) {
-        const dl = d.toLowerCase();
-        if (t.includes(dl) || msg.includes(dl)) return true;
-      }
-      const cities = TerritoriesManager.oblastCitiesMap[State.selectedRegion] || [];
-      for (const c of cities) {
-        const cl = c.toLowerCase();
-        if (t.includes(cl) || msg.includes(cl)) return true;
+    let parsed = n.parsedTerritory;
+    if (!parsed) {
+      if (window.TerritoriesManager && typeof TerritoriesManager.resolveMessageTerritory === 'function') {
+        const combined = `${n.title || ''} ${n.message || ''} ${n.territory || ''}`;
+        parsed = TerritoriesManager.resolveMessageTerritory(combined, n.source || '');
+        n.parsedTerritory = parsed;
       }
     }
 
-    // Перевірка результатів аналізу LLM
-    if (n.analysis && Array.isArray(n.analysis.territories)) {
-      for (const at of n.analysis.territories) {
-        const atl = at.toLowerCase();
-        if (atl.includes(sel) || sel.includes(atl)) return true;
-        if (TerritoriesManager && TerritoriesManager.oblastDistrictsMap) {
-          const districts = TerritoriesManager.oblastDistrictsMap[State.selectedRegion] || [];
-          if (districts.some(d => d.toLowerCase().includes(atl) || atl.includes(d.toLowerCase()))) return true;
-        }
-      }
+    if (!parsed || !window.TerritoriesManager || typeof TerritoriesManager.isMatchingTerritory !== 'function') {
+      return false;
     }
 
-    return false;
+    return TerritoriesManager.isMatchingTerritory(
+      parsed,
+      State.selectedRegion,
+      State.selectedDistrict,
+      State.showEntireRegionWithDistrict !== false
+    );
   },
 
   isFollowedNotification(n) {
-    if (FollowManager.followedSet.size === 0) return true;
-    const t = (n.territory || '').toLowerCase();
-    const title = (n.title || '').toLowerCase();
-    const msg = (n.message || '').toLowerCase();
+    if (!FollowManager || FollowManager.followedSet.size === 0) return true;
+    let parsed = n.parsedTerritory;
+    if (!parsed && window.TerritoriesManager && typeof TerritoriesManager.resolveMessageTerritory === 'function') {
+      const combined = `${n.title || ''} ${n.message || ''} ${n.territory || ''}`;
+      parsed = TerritoriesManager.resolveMessageTerritory(combined, n.source || '');
+      n.parsedTerritory = parsed;
+    }
 
     for (const f of FollowManager.followedSet) {
       const fl = f.toLowerCase();
-      if (t.includes(fl) || title.includes(fl) || msg.includes(fl)) return true;
-      if (fl.includes('вінниц') && (t.includes('вінниц') || msg.includes('вінниц') || msg.includes('жмеринк') || msg.includes('хмільник') || msg.includes('гайсин') || msg.includes('тульчин') || msg.includes('могилів') || msg.includes('бар') || msg.includes('козятин'))) return true;
-      if (fl.includes('київ') && (t.includes('київ') || msg.includes('київ'))) return true;
-      if (fl.includes('крим') && (t.includes('крим') || msg.includes('крим'))) return true;
-      if (fl.includes('севастополь') && (t.includes('севастополь') || msg.includes('севастополь'))) return true;
+      if (parsed) {
+        if ((parsed.territories.localities || []).some(l => l.toLowerCase() === fl)) return true;
+        if ((parsed.territories.districts || []).some(d => d.toLowerCase() === fl)) return true;
+        if ((parsed.territories.oblasts || []).some(o => o.toLowerCase() === fl)) return true;
+      }
+      if ((n.territory || '').toLowerCase().includes(fl)) return true;
+      if ((n.title || '').toLowerCase().includes(fl)) return true;
+      if ((n.message || '').toLowerCase().includes(fl)) return true;
     }
     if (n.analysis && n.analysis.relevant) return true;
     return false;
@@ -1691,22 +1837,11 @@ const TelegramFeedService = {
     const container = document.getElementById('tg-messages-list');
     if (!container) return;
 
-    // Синхронізація індикатора обраного регіону
-    const regionBadgeText = document.getElementById('tg-region-badge-text');
-    const resetBtn = document.getElementById('tg-btn-reset-region');
-    if (regionBadgeText) {
-      if (State.selectedRegion && State.selectedRegion !== 'all') {
-        regionBadgeText.textContent = `Регіон: ${State.selectedRegion}`;
-        resetBtn?.classList.remove('hidden');
-      } else {
-        regionBadgeText.textContent = 'Регіон: Вся Україна';
-        resetBtn?.classList.add('hidden');
-      }
-    }
+    this.syncDistrictDropdown();
 
     let filtered = this.notifications;
 
-    // 1. Строга прив'язка до обраного регіону (Section 53 & Telegram binding)
+    // 1. Строга прив'язка до обраного регіону та району
     if (State.selectedRegion && State.selectedRegion !== 'all') {
       filtered = filtered.filter(n => this.matchesRegion(n));
     }
@@ -1744,11 +1879,11 @@ const TelegramFeedService = {
     if (filtered.length === 0) {
       container.innerHTML = `
         <div class="text-center py-20 text-gray-400">
-          <div class="w-12 h-12 mx-auto mb-2 text-sky-400/60 flex items-center justify-center rounded-full bg-sky-500/10 border border-sky-500/20 text-xl font-bold">
-            🔔
+          <div class="w-12 h-12 mx-auto mb-2 text-sky-400/60 flex items-center justify-center rounded-full bg-sky-500/10 border border-sky-500/20">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           </div>
           <p class="text-sm font-semibold text-gray-200">Сповіщень не знайдено</p>
-          <p class="text-xs text-gray-400 mt-1">${State.selectedRegion && State.selectedRegion !== 'all' ? `Немає сповіщень для території: <b>${escapeHtml(State.selectedRegion)}</b>. Натисніть ✕ поруч із назвою, щоб переглянути всі регіони.` : 'Змініть фільтр або очистіть критерій пошуку'}</p>
+          <p class="text-xs text-gray-400 mt-1">${State.selectedRegion && State.selectedRegion !== 'all' ? `Немає сповіщень для території: <b>${escapeHtml(State.selectedRegion)}</b>. Скиньте фільтр регіону, щоб переглянути всі події.` : 'Змініть фільтр або очистіть критерій пошуку'}</p>
         </div>`;
       return;
     }
@@ -1763,7 +1898,7 @@ const TelegramFeedService = {
   renderNotificationCard(n) {
     const isUrgent = n.priority === 'URGENT';
     const urgentCardClass = isUrgent ? 'urgent-notification-card' : '';
-    const urgentBadgeHtml = isUrgent ? '<span class="urgent-badge-pill">🚨 ТЕРМІНОВЕ СПОВІЩЕННЯ</span>' : '';
+    const urgentBadgeHtml = isUrgent ? '<span class="urgent-badge-pill">ТЕРМІНОВЕ СПОВІЩЕННЯ</span>' : '';
 
     if (n.type === 'OFFICIAL_ALERT' || n.type === 'alert') {
       const isClear = n.status === 'ВІДБІЙ';
@@ -1778,7 +1913,7 @@ const TelegramFeedService = {
             <div class="flex items-center gap-2 flex-wrap">
               ${urgentBadgeHtml}
               <span class="px-2 py-0.5 rounded text-[10px] font-bold text-white shadow-sm" style="background-color: ${c}">
-                ${isClear ? '🟢 ВІДБІЙ ТРИВОГИ' : `🔴 ОФІЦІЙНА ТРИВОГА [${(n.level || 'RED').toUpperCase()}]`}
+                ${isClear ? 'ВІДБІЙ ТРИВОГИ' : `ОФІЦІЙНА ТРИВОГА [${(n.level || 'RED').toUpperCase()}]`}
               </span>
               <span class="text-[10px] font-mono text-gray-400">${escapeHtml(n.source || 'NEPTUN API')}</span>
             </div>
@@ -1787,7 +1922,7 @@ const TelegramFeedService = {
             </div>
           </div>
           <div class="flex items-center justify-between">
-            <h4 class="text-sm font-bold text-white group-hover:text-sky-300 transition-colors">📍 ${escapeHtml(n.title)}</h4>
+            <h4 class="text-sm font-bold text-white group-hover:text-sky-300 transition-colors">${escapeHtml(n.title)}</h4>
             <span class="text-[10px] text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">Показати на карті →</span>
           </div>
           <p class="text-xs text-gray-300 mt-1 leading-relaxed">${escapeHtml(n.message)}</p>
@@ -1800,8 +1935,8 @@ const TelegramFeedService = {
       const isLaunch = n.type === 'LAUNCH';
       const timeDisplay = n.eventTime ? `Час фіксації: ${formatEventTime(n.eventTime, true)}` : `Час: ${formatEventTime(n.receivedAt, true)}`;
       const typeBadge = isClear 
-        ? '✅ ЦІЛЬ ЗНИКЛА' 
-        : (isLaunch ? `🚀 ЗАПУСК [${(n.subtype || 'РАКЕТА').toUpperCase()}]` : `🟠 ЗАГРОЗА [${(n.subtype || 'ЦІЛЬ').toUpperCase()}]`);
+        ? 'ЦІЛЬ ЗНИКЛА' 
+        : (isLaunch ? `ЗАПУСК [${(n.subtype || 'РАКЕТА').toUpperCase()}]` : `ЗАГРОЗА [${(n.subtype || 'ЦІЛЬ').toUpperCase()}]`);
       const typeBadgeClass = isClear 
         ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' 
         : (isLaunch ? 'bg-red-500/25 text-red-200 border border-red-500/50' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40');
@@ -1819,7 +1954,7 @@ const TelegramFeedService = {
             <span class="font-mono text-[10px] text-amber-300 font-bold">${timeDisplay}</span>
           </div>
           <div class="flex items-center justify-between">
-            <h4 class="text-sm font-bold text-amber-200 group-hover:text-amber-100">⚠️ ${escapeHtml(n.title)} ${n.territory ? `(${escapeHtml(n.territory)})` : ''}</h4>
+            <h4 class="text-sm font-bold text-amber-200 group-hover:text-amber-100">${escapeHtml(n.title)} ${n.territory ? `(${escapeHtml(n.territory)})` : ''}</h4>
             <span class="text-[10px] text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">Показати на карті →</span>
           </div>
           <p class="text-xs text-gray-300 mt-1 leading-relaxed">${escapeHtml(n.message)}</p>
@@ -1838,20 +1973,20 @@ const TelegramFeedService = {
       const catClass = `cat-${analysis.category || 'info'}`;
       let catBadge = '';
       if (analysis.category === 'active_threat') {
-        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-red-500/20 text-red-300 border border-red-500/40">🔴 АКТИВНА ЗАГРОЗА</span>';
+        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-red-500/20 text-red-300 border border-red-500/40">АКТИВНА ЗАГРОЗА</span>';
       } else if (analysis.category === 'possible_threat') {
-        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40">⚠️ МОЖЛИВА ЗАГРОЗА</span>';
+        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40">МОЖЛИВА ЗАГРОЗА</span>';
       } else if (analysis.category === 'clear') {
-        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">🟢 ВІДБІЙ ЗАГРОЗИ</span>';
+        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">ВІДБІЙ ЗАГРОЗИ</span>';
       } else {
-        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-sky-500/20 text-sky-300 border border-sky-400/40">ℹ️ ІНФО</span>';
+        catBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-sky-500/20 text-sky-300 border border-sky-400/40">ІНФО</span>';
       }
 
       const territoriesBadges = (analysis.territories || []).map(t =>
-        `<span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-400/25">📍 ${escapeHtml(t)}</span>`
+        `<span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-400/25">${escapeHtml(t)}</span>`
       ).join(' ');
 
-      const timeText = analysis.timeMentioned ? `<span class="text-amber-300 font-mono text-[10px] ml-2">🕒 ${escapeHtml(analysis.timeMentioned)}</span>` : '';
+      const timeText = analysis.timeMentioned ? `<span class="text-amber-300 font-mono text-[10px] ml-2">${escapeHtml(analysis.timeMentioned)}</span>` : '';
       const analysisTimeDisplay = analysis.analyzedAt ? `Аналіз LLM: ${formatEventTime(analysis.analyzedAt, true)}` : '';
 
       llmHtml = `
@@ -1873,7 +2008,7 @@ const TelegramFeedService = {
           ${territoriesBadges ? `<div class="flex flex-wrap gap-1 pt-0.5">${territoriesBadges}</div>` : ''}
 
           <div class="pt-1 border-t border-white/5 flex items-center justify-between text-[9px] font-mono text-gray-400">
-            <span>✓ 100% на основі першоджерела (без домислів)</span>
+            <span>Підтверджено першоджерелом (без домислів)</span>
             <span>${analysis.analyzedAt ? new Date(analysis.analyzedAt).toLocaleTimeString('uk-UA') : ''}</span>
           </div>
         </div>`;
@@ -1885,7 +2020,7 @@ const TelegramFeedService = {
           <div class="flex items-center gap-2 flex-wrap">
             ${urgentBadgeHtml}
             <span class="text-xs font-bold text-sky-300 font-mono">${escapeHtml(channelName)}</span>
-            <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-blue-500/20 text-blue-300 border border-blue-400/30">🔵 ІНФО (НЕ ТРИВОГА)</span>
+            <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-blue-500/20 text-blue-300 border border-blue-400/30">ІНФО (НЕ ТРИВОГА)</span>
           </div>
           <span class="text-[10px] font-mono text-gray-400">${msgTimeDisplay}</span>
         </div>
@@ -1965,16 +2100,22 @@ const MessagesService = {
 
     const key = msg.id || `${channel}::${msg.date || ''}::${text.trim()}`;
 
+    // Аналізуємо територіальну прив'язку за змістом повідомлення (НЕ за назвою каналу)
+    // і кешуємо результат, щоб GlobalTerritoryFilter не робив повторний NLP.
+    const msgParsed = (typeof TerritoriesManager !== 'undefined')
+      ? TerritoriesManager.resolveMessageTerritory(text, channel)
+      : null;
+
     NotificationDispatcher.dispatch({
       id: `msg_${key}`,
       type: category,
       priority: isUrgent ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
-      title: isLaunch ? `🚀 ${channel}: Пуск / Загроза` : `🔵 ${channel}`,
+      title: isLaunch ? `${channel}: Пуск / Загроза` : channel,
       body: text,
-      place: matchedTerritory || '',
+      place: msgParsed?.primaryPlace || matchedTerritory || '',
       eventTime: msg.date || null,
       source: channel,
-      raw: msg
+      raw: { ...msg, _parsedTerritory: msgParsed }
     });
   },
 
@@ -2026,6 +2167,97 @@ const NavigationController = {
     document.getElementById('m-tab-settings')?.addEventListener('click', () => this.switchTab('settings'));
 
     this.applyTabVisibility();
+    this.bindSwipeNavigation();
+  },
+
+  getAvailableTabs() {
+    const s = StorageManager.getSettings();
+    const tabs = ['map', 'alerts', 'telegram'];
+    if (s.aiTabVisible !== false) tabs.push('ai');
+    return tabs;
+  },
+
+  bindSwipeNavigation() {
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    let isVerticalScroll = false;
+    let isHorizontalGesture = false;
+
+    const onTouchStart = (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      
+      const target = e.target;
+      if (target.closest('input, select, textarea, button, #settings-modal, #modal-tree, #user-location-modal')) {
+        return;
+      }
+
+      // Якщо користувач взаємодіє з картою на вкладці map
+      if (this.currentTab === 'map' && target.closest('#map')) {
+        // Дозволяємо перемикання з карти тільки від лівого або правого краю екрана (крайовий свайп)
+        const touchX = e.touches[0].clientX;
+        if (touchX > 45 && touchX < window.innerWidth - 45) {
+          return;
+        }
+      }
+
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startTime = Date.now();
+      isVerticalScroll = false;
+      isHorizontalGesture = false;
+    };
+
+    const onTouchMove = (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      if (isVerticalScroll) return;
+
+      const currentX = e.touches[0].clientX;
+      const currentY = e.touches[0].clientY;
+      const deltaX = currentX - startX;
+      const deltaY = currentY - startY;
+      const absX = Math.abs(deltaX);
+      const absY = Math.abs(deltaY);
+
+      if (!isHorizontalGesture && !isVerticalScroll) {
+        if (absY > 8 && absY > absX) {
+          isVerticalScroll = true; // Нативний вертикальний скрол списку тривог чи повідомлень
+          return;
+        }
+        if (absX > 10 && absX > absY * 1.2) {
+          isHorizontalGesture = true;
+        }
+      }
+    };
+
+    const onTouchEnd = (e) => {
+      if (isVerticalScroll || !isHorizontalGesture) return;
+      if (!e.changedTouches || e.changedTouches.length !== 1) return;
+
+      const endX = e.changedTouches[0].clientX;
+      const endY = e.changedTouches[0].clientY;
+      const deltaX = endX - startX;
+      const deltaY = endY - startY;
+      const duration = Date.now() - startTime;
+      const absX = Math.abs(deltaX);
+      const absY = Math.abs(deltaY);
+
+      if (duration < 500 && absX >= 45 && absX > 1.3 * absY) {
+        const availableTabs = this.getAvailableTabs();
+        const currentIdx = availableTabs.indexOf(this.currentTab);
+        if (currentIdx === -1) return;
+
+        if (deltaX < 0 && currentIdx < availableTabs.length - 1) {
+          this.switchTab(availableTabs[currentIdx + 1]);
+        } else if (deltaX > 0 && currentIdx > 0) {
+          this.switchTab(availableTabs[currentIdx - 1]);
+        }
+      }
+    };
+
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchmove', onTouchMove, { passive: true });
+    document.addEventListener('touchend', onTouchEnd, { passive: true });
   },
 
   applyTabVisibility() {
@@ -2080,24 +2312,28 @@ const NavigationController = {
     const viewTelegram = document.getElementById('view-telegram');
     const viewAi       = document.getElementById('view-ai');
     const leftPanel    = document.getElementById('left-panel');
+    const mobileToggle = document.getElementById('btn-mobile-toggle-panel');
 
     if (tab === 'alerts') {
       viewAlerts?.classList.remove('hidden');
       viewTelegram?.classList.add('hidden');
       viewAi?.classList.add('hidden');
       leftPanel?.classList.add('hidden');
+      mobileToggle?.classList.add('hidden');
       AlertsService.render();
     } else if (tab === 'telegram') {
       viewAlerts?.classList.add('hidden');
       viewTelegram?.classList.remove('hidden');
       viewAi?.classList.add('hidden');
       leftPanel?.classList.add('hidden');
+      mobileToggle?.classList.add('hidden');
       TelegramFeedService.render();
     } else if (tab === 'ai') {
       viewAlerts?.classList.add('hidden');
       viewTelegram?.classList.add('hidden');
       viewAi?.classList.remove('hidden');
       leftPanel?.classList.add('hidden');
+      mobileToggle?.classList.add('hidden');
       AIService?.updateEnabledState();
       AIService?.render();
     } else {
@@ -2105,8 +2341,12 @@ const NavigationController = {
       viewAlerts?.classList.add('hidden');
       viewTelegram?.classList.add('hidden');
       viewAi?.classList.add('hidden');
-      leftPanel?.classList.remove('hidden');
-      MapService.map?.invalidateSize();
+      mobileToggle?.classList.remove('hidden');
+      // On desktop, left panel is visible; on mobile it starts collapsed unless opened
+      if (window.innerWidth >= 640) {
+        leftPanel?.classList.remove('hidden');
+      }
+      setTimeout(() => MapService.map?.invalidateSize(), 50);
     }
   }
 };
@@ -2372,7 +2612,7 @@ const MapService = {
     const parentName    = isKyiv || isSevastopol ? 'Місто зі спеціальним статусом' : region;
 
     const isStarred = FollowManager.isFollowed(territoryName);
-    const starBtnText = isStarred ? '⭐ Ви стежите' : '☆ Слідкувати';
+    const starBtnText = isStarred ? 'Відстежується' : 'Слідкувати';
     const starBtnClass = isStarred
       ? 'px-2 py-1 rounded bg-amber-500/25 border border-amber-400 text-amber-300 font-bold text-[10px]'
       : 'px-2 py-1 rounded bg-white/10 hover:bg-white/20 border border-white/20 text-gray-200 text-[10px]';
@@ -2391,7 +2631,7 @@ const MapService = {
     if (alert) {
       const color = getAlertColor(alert.level);
       const lvlUpper = (alert.level || 'RED').toUpperCase();
-      statusBadge = `<span class="px-2 py-0.5 rounded font-bold text-white text-[10px] shadow" style="background-color: ${color}">🚨 АКТИВНА [${lvlUpper}]</span>`;
+      statusBadge = `<span class="px-2 py-0.5 rounded font-bold text-white text-[10px] shadow" style="background-color: ${color}">АКТИВНА [${lvlUpper}]</span>`;
 
       const sinceFormatted = alert.since ? new Date(alert.since).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : 'Не вказано';
       detailsHtml += `
@@ -2410,13 +2650,13 @@ const MapService = {
         `;
       }
     } else {
-      statusBadge = `<span class="px-2 py-0.5 rounded font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 text-[10px]">✓ СПОКІЙНО (Тривога: НІ)</span>`;
+      statusBadge = `<span class="px-2 py-0.5 rounded font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 text-[10px]">СПОКІЙНО (Тривога: НІ)</span>`;
     }
 
     if (threatCount > 0) {
       detailsHtml += `
         <div class="flex justify-between py-1 border-b border-white/10 text-amber-400">
-          <span>⚠️ Активних цілей поруч:</span>
+          <span>Активних цілей поруч:</span>
           <span class="font-bold">${threatCount}</span>
         </div>
       `;
@@ -2706,7 +2946,7 @@ const MapService = {
     const isStale = (now - (marker._lastUpdated || now)) > 45000;
     const details = [];
     if (threat.areaOnly) {
-      details.push(`<div class="text-amber-400 font-semibold mb-1">⚠️ Загроза по області (орієнтовний район, не точні координати)</div>`);
+      details.push(`<div class="text-amber-400 font-semibold mb-1">Загроза по області (орієнтовний район, не точні координати)</div>`);
     } else {
       if (threat.locality) details.push(`<div><span class="text-gray-400">Населений пункт:</span> <b>${escapeHtml(threat.locality)}</b></div>`);
       if (threat.heading != null) details.push(`<div><span class="text-gray-400">Курс:</span> <b>${formatHeading(threat.heading)}</b></div>`);
@@ -2716,19 +2956,23 @@ const MapService = {
     }
 
     if (isStale) {
-      details.push(`<div class="text-amber-300 font-mono text-[10px] mt-1 bg-amber-500/10 p-1 rounded border border-amber-500/20">⏳ Останнє оновлення &gt; 45 сек тому</div>`);
+      details.push(`<div class="text-amber-300 font-mono text-[10px] mt-1 bg-amber-500/10 p-1 rounded border border-amber-500/20">Останнє оновлення &gt; 45 сек тому</div>`);
     }
 
     marker.bindPopup(`
       <div class="custom-radar-popup p-1 font-mono text-[11px]">
         <div class="pb-1 mb-1 border-b border-amber-500/30 text-amber-400 font-bold uppercase">
-          ${threat.areaOnly ? '📍 ОБЛАСНА ЗАГРОЗА' : '⚠️ АКТИВНА ЦІЛЬ'} (${threat.title || threat.type})
+          ${threat.areaOnly ? 'ОБЛАСНА ЗАГРОЗА' : 'АКТИВНА ЦІЛЬ'} (${threat.title || threat.type})
         </div>
         <div><span class="text-gray-400">ID:</span> <b>${threat.id}</b></div>
         <div><span class="text-gray-400">Регіон:</span> ${threat.region}${threat.district ? ` (${threat.district})` : ''}</div>
         ${details.join('')}
         <div><span class="text-gray-400">Час засічки:</span> ${threat.time || 'Н/Д'}</div>
-      </div>`, { className: 'custom-radar-popup' });
+      </div>`, {
+        className: 'custom-radar-popup',
+        autoPanPaddingTopLeft: [15, 80],
+        autoPanPaddingBottomRight: [15, 90]
+      });
   },
 
   removeThreat(threatId) {
@@ -2747,6 +2991,56 @@ const MapService = {
       this.threatPolylines.delete(threatId);
     }
     State.trajectories.delete(threatId);
+  },
+
+  userMarker: null,
+  userRadiusCircle: null,
+
+  updateUserLocation(lat, lon, accuracy, radiusKm) {
+    if (!this.map || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+    if (!this.userMarker) {
+      const icon = L.divIcon({
+        className: 'user-location-marker-container',
+        html: '<div class="user-location-marker"><div class="user-location-pulse"></div><div class="user-location-dot"></div></div>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
+      });
+      this.userMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 }).addTo(this.map);
+    } else {
+      this.userMarker.setLatLng([lat, lon]);
+    }
+
+    if (radiusKm && radiusKm > 0) {
+      if (!this.userRadiusCircle) {
+        this.userRadiusCircle = L.circle([lat, lon], {
+          radius: radiusKm * 1000,
+          color: '#0284c7',
+          weight: 1.5,
+          dashArray: '4, 6',
+          fillColor: '#38bdf8',
+          fillOpacity: 0.08,
+          interactive: false
+        }).addTo(this.map);
+      } else {
+        this.userRadiusCircle.setLatLng([lat, lon]);
+        this.userRadiusCircle.setRadius(radiusKm * 1000);
+      }
+    } else if (this.userRadiusCircle) {
+      this.map.removeLayer(this.userRadiusCircle);
+      this.userRadiusCircle = null;
+    }
+  },
+
+  removeUserLocation() {
+    if (this.userMarker && this.map) {
+      this.map.removeLayer(this.userMarker);
+      this.userMarker = null;
+    }
+    if (this.userRadiusCircle && this.map) {
+      this.map.removeLayer(this.userRadiusCircle);
+      this.userRadiusCircle = null;
+    }
   }
 };
 
@@ -2789,10 +3083,10 @@ const FollowManager = {
     if (!name) return;
     if (this.followedSet.has(name)) {
       this.followedSet.delete(name);
-      showToast(`⭐ Припинено стеження за: ${name}`);
+      showToast(`Припинено стеження за: ${name}`);
     } else {
       this.followedSet.add(name);
-      showToast(`⭐ Стеження за: ${name}`);
+      showToast(`Стеження за: ${name}`);
     }
     this.save();
     this.renderFollowedList();
@@ -2812,7 +3106,7 @@ const FollowManager = {
     if (countEl) countEl.textContent = this.followedSet.size;
 
     if (this.followedSet.size === 0) {
-      listEl.innerHTML = `<p class="text-[10px] text-gray-400 text-center py-2 italic">Натисніть ⭐ біля території для швидкого стеження</p>`;
+      listEl.innerHTML = `<p class="text-[10px] text-gray-400 text-center py-2 italic">Натисніть зірочку біля території для швидкого стеження</p>`;
       return;
     }
 
@@ -2833,12 +3127,14 @@ const FollowManager = {
       return `
         <div class="flex items-center justify-between p-1.5 rounded-lg bg-black/40 hover:bg-white/5 border border-white/10 transition-colors cursor-pointer group" onclick="MapService.selectAndShowDistrict('${name}', true)">
           <div class="flex items-center gap-1.5 truncate">
-            <span class="text-xs">📍</span>
+            <svg class="w-3.5 h-3.5 text-sky-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"/><circle cx="12" cy="10" r="3"/></svg>
             <span class="text-xs font-semibold text-gray-200 truncate group-hover:text-sky-300">${name}</span>
           </div>
           <div class="flex items-center gap-1.5 flex-shrink-0">
             ${statusBadge}
-            <button onclick="event.stopPropagation(); FollowManager.toggleFollowByName('${name}');" class="text-amber-400 hover:text-white p-0.5" title="Видалити">✕</button>
+            <button onclick="event.stopPropagation(); FollowManager.toggleFollowByName('${name}');" class="text-amber-400 hover:text-white p-0.5" title="Видалити">
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
           </div>
         </div>
       `;
@@ -2847,12 +3143,69 @@ const FollowManager = {
 };
 
 /* ============================================================
-   11. TERRITORIES MANAGER (ПОШУК ТА ІЄРАРХІЯ)
+   11. TERRITORIES MANAGER (ПОШУК, ІЄРАРХІЯ ТА АДМІНІСТРАТИВНИЙ РЕЗОЛВЕР)
 ============================================================ */
 const TerritoriesManager = {
-  hierarchy: [],
-  flat:      [],
-  byId:      new Map(),
+  hierarchy:          [],
+  flat:               [],
+  byId:               new Map(),
+  oblastDistrictsMap: {},
+  districtOblastMap:  {},
+  cityDistrictMap:    {},
+  cityOblastMap:      {},
+  allDistricts:       new Set(),
+  allOblasts:         new Set(),
+  allCities:          new Set(),
+
+  extraLocalities: [
+    // Населені пункти Вінницького району
+    { city: 'Стрижавка', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Вороновиця', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Літин', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Погребище', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Оратів', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Тиврів', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Сутиски', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Лука-Мелешківська', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Якушинці', district: 'Вінницький район', oblast: 'Вінницька область' },
+    { city: 'Агрономічне', district: 'Вінницький район', oblast: 'Вінницька область' },
+    // Інші райони Вінницької області
+    { city: 'Ладижин', district: 'Гайсинський район', oblast: 'Вінницька область' },
+    { city: 'Бершадь', district: 'Гайсинський район', oblast: 'Вінницька область' },
+    { city: 'Теплик', district: 'Гайсинський район', oblast: 'Вінницька область' },
+    { city: 'Тростянець', district: 'Гайсинський район', oblast: 'Вінницька область' },
+    { city: 'Чечельник', district: 'Гайсинський район', oblast: 'Вінницька область' },
+    { city: 'Бар', district: 'Жмеринський район', oblast: 'Вінницька область' },
+    { city: 'Шаргород', district: 'Жмеринський район', oblast: 'Вінницька область' },
+    { city: 'Калинівка', district: 'Хмільницький район', oblast: 'Вінницька область' },
+    { city: 'Козятин', district: 'Хмільницький район', oblast: 'Вінницька область' },
+    { city: 'Вапнярка', district: 'Тульчинський район', oblast: 'Вінницька область' },
+    { city: 'Крижопіль', district: 'Тульчинський район', oblast: 'Вінницька область' },
+    { city: 'Томашпіль', district: 'Тульчинський район', oblast: 'Вінницька область' },
+    { city: 'Піщанка', district: 'Тульчинський район', oblast: 'Вінницька область' },
+    { city: 'Ямпіль', district: 'Могилів-Подільський район', oblast: 'Вінницька область' },
+    { city: 'Муровані Курилівці', district: 'Могилів-Подільський район', oblast: 'Вінницька область' },
+    // Інші ключові міста та райони України
+    { city: 'Кременчук', district: 'Кременчуцький район', oblast: 'Полтавська область' },
+    { city: 'Миргород', district: 'Миргородський район', oblast: 'Полтавська область' },
+    { city: 'Лубни', district: 'Лубенський район', oblast: 'Полтавська область' },
+    { city: 'Очаків', district: 'Миколаївський район', oblast: 'Миколаївська область' },
+    { city: 'Вознесенськ', district: 'Вознесенський район', oblast: 'Миколаївська область' },
+    { city: 'Первомайськ', district: 'Первомайський район', oblast: 'Миколаївська область' },
+    { city: 'Бровари', district: 'Броварський район', oblast: 'Київська область' },
+    { city: 'Бориспіль', district: 'Бориспільський район', oblast: 'Київська область' },
+    { city: 'Біла Церква', district: 'Білоцерківський район', oblast: 'Київська область' },
+    { city: 'Фастів', district: 'Фастівський район', oblast: 'Київська область' },
+    { city: 'Буча', district: 'Бучанський район', oblast: 'Київська область' },
+    { city: 'Ірпінь', district: 'Бучанський район', oblast: 'Київська область' },
+    { city: 'Вишгород', district: 'Вишгородський район', oblast: 'Київська область' },
+    { city: 'Обухів', district: 'Обухівський район', oblast: 'Київська область' },
+    { city: 'Кривий Ріг', district: 'Криворізький район', oblast: 'Дніпропетровська область' },
+    { city: 'Нікополь', district: 'Нікопольський район', oblast: 'Дніпропетровська область' },
+    { city: 'Павлоград', district: 'Павлоградський район', oblast: 'Дніпропетровська область' },
+    { city: 'Камʼянське', district: 'Камʼянський район', oblast: 'Дніпропетровська область' },
+    { city: 'Новомосковськ', district: 'Самарівський район', oblast: 'Дніпропетровська область' }
+  ],
 
   async load() {
     try {
@@ -2873,6 +3226,346 @@ const TerritoriesManager = {
       this.byId.clear();
       for (const item of this.flat) this.byId.set(item.id, item);
     }
+    this.buildIndices();
+  },
+
+  buildIndices() {
+    this.oblastDistrictsMap = {};
+    this.districtOblastMap  = {};
+    this.cityDistrictMap    = {};
+    this.cityOblastMap      = {};
+    this.allDistricts.clear();
+    this.allOblasts.clear();
+    this.allCities.clear();
+
+    for (const reg of this.hierarchy) {
+      const regName = reg.name;
+      this.allOblasts.add(regName);
+      if (!this.oblastDistrictsMap[regName]) this.oblastDistrictsMap[regName] = [];
+
+      for (const dist of (reg.districts || [])) {
+        const distName = dist.name;
+        this.allDistricts.add(distName);
+        this.oblastDistrictsMap[regName].push(distName);
+        this.districtOblastMap[distName] = regName;
+
+        for (const city of (dist.cities || [])) {
+          const cityName = city.name;
+          this.allCities.add(cityName);
+          this.cityDistrictMap[cityName] = distName;
+          this.cityOblastMap[cityName]   = regName;
+        }
+      }
+    }
+
+    // Додаємо розширений словник населених пунктів
+    for (const item of this.extraLocalities) {
+      this.allCities.add(item.city);
+      this.cityDistrictMap[item.city] = item.district;
+      this.cityOblastMap[item.city]   = item.oblast;
+      if (item.oblast && this.oblastDistrictsMap[item.oblast]) {
+        if (!this.oblastDistrictsMap[item.oblast].includes(item.district)) {
+          this.oblastDistrictsMap[item.oblast].push(item.district);
+        }
+      }
+      this.districtOblastMap[item.district] = item.oblast;
+      this.allDistricts.add(item.district);
+    }
+  },
+
+  getDistrictsForOblast(oblastName) {
+    if (!oblastName || oblastName === 'all') return [];
+    return this.oblastDistrictsMap[oblastName] || [];
+  },
+
+  resolveMessageTerritory(text, channel = '') {
+    if (!text && !channel) {
+      return {
+        territories: { country: 'Україна', oblasts: [], districts: [], localities: [] },
+        isNational: false,
+        confidence: 0,
+        source: 'message_text',
+        primaryPlace: ''
+      };
+    }
+
+    const t = (text || '').toLowerCase();
+    const ch = (channel || '').toLowerCase();
+
+    // 1. Перевірка на загальноукраїнські події (National events)
+    const nationalPatterns = [
+      /зліт.*міг-31к/i, /міг-31к.*зліт/i, /зліт.*ту-95/i, /зліт.*ту-22/i,
+      /по всій.*україн/i, /для всієї.*україн/i, /вся україн/i,
+      /масштабна.*тривог/i, /ракетна небезпека по всій/i,
+      /загроза балістики по всій/i, /загроза крилатих ракет по всій/i
+    ];
+    let isNational = false;
+    for (const pat of nationalPatterns) {
+      if (pat.test(t)) {
+        isNational = true;
+        break;
+      }
+    }
+
+    const oblastsFound   = new Set();
+    const districtsFound = new Set();
+    const localitiesFound = new Set();
+
+    // 2. Строгі правила для спец-суб'єктів та частих міст (Київ, Севастополь, Дніпро):
+    const hasKyivOblast = /київськ[а-я]*\s+обл/i.test(t) || /київщин[а-я]*/i.test(t);
+    const hasKyivCity   = /(?:^|[^\p{L}\d_])ки[єїв][а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
+    if (hasKyivOblast) oblastsFound.add('Київська область');
+    if (hasKyivCity && !hasKyivOblast) {
+      oblastsFound.add('Київ');
+      localitiesFound.add('Київ');
+    }
+
+    const hasCrimea     = /(?:^|[^\p{L}\d_])крим[а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
+    const hasSevastopol = /(?:^|[^\p{L}\d_])севастопол[а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
+    if (hasCrimea) oblastsFound.add('Автономна Республіка Крим');
+    if (hasSevastopol) {
+      oblastsFound.add('Севастополь');
+      localitiesFound.add('Севастополь');
+    }
+
+    const hasDniproOblast = /дніпропетровськ[а-я]*\s+обл/i.test(t) || /дніпропетровщин[а-я]*/i.test(t);
+    const hasDniproCity   = /(?:^|[^\p{L}\d_])дніпр[оаіеу][м]?(?:[^\p{L}\d_]|$)/iu.test(t);
+    if (hasDniproOblast) oblastsFound.add('Дніпропетровська область');
+    if (hasDniproCity) {
+      localitiesFound.add('Дніпро');
+      districtsFound.add('Дніпровський район');
+      oblastsFound.add('Дніпропетровська область');
+    }
+
+    const hasVinnOblast   = /вінницьк[а-я]*\s+обл/i.test(t) || /вінниччин[а-я]*/i.test(t);
+    const hasVinnDistrict = /вінницьк[а-я]*\s+район/i.test(t);
+    const hasVinnCity     = /(?:^|[^\p{L}\d_])вінниц[яіеюь][ю]?(?:[^\p{L}\d_]|$)/iu.test(t);
+    if (hasVinnOblast)   oblastsFound.add('Вінницька область');
+    if (hasVinnDistrict) {
+      districtsFound.add('Вінницький район');
+      oblastsFound.add('Вінницька область');
+    }
+    if (hasVinnCity) {
+      localitiesFound.add('Вінниця');
+      districtsFound.add('Вінницький район');
+      oblastsFound.add('Вінницька область');
+    }
+
+    const hasPoltavaOblast   = /полтавськ[а-я]*\s+обл/i.test(t) || /полтавщин[а-я]*/i.test(t);
+    const hasPoltavaDistrict = /полтавськ[а-я]*\s+район/i.test(t);
+    const hasPoltavaCity     = /(?:^|[^\p{L}\d_])полтав[аіеуо][ю]?(?:[^\p{L}\d_]|$)/iu.test(t);
+    if (hasPoltavaOblast)   oblastsFound.add('Полтавська область');
+    if (hasPoltavaDistrict) {
+      districtsFound.add('Полтавський район');
+      oblastsFound.add('Полтавська область');
+    }
+    if (hasPoltavaCity) {
+      localitiesFound.add('Полтава');
+      districtsFound.add('Полтавський район');
+      oblastsFound.add('Полтавська область');
+    }
+
+    const hasMykOblast   = /миколаївськ[а-я]*\s+обл/i.test(t) || /миколаївщин[а-я]*/i.test(t);
+    const hasMykDistrict = /миколаївськ[а-я]*\s+район/i.test(t);
+    const hasMykCity     = /(?:^|[^\p{L}\d_])микола[єїв][а-я]*(?:[^\p{L}\d_]|$)/iu.test(t);
+    if (hasMykOblast)   oblastsFound.add('Миколаївська область');
+    if (hasMykDistrict) {
+      districtsFound.add('Миколаївський район');
+      oblastsFound.add('Миколаївська область');
+    }
+    if (hasMykCity) {
+      localitiesFound.add('Миколаїв');
+      districtsFound.add('Миколаївський район');
+      oblastsFound.add('Миколаївська область');
+    }
+
+    // 3. Сканування населених пунктів за словником
+    // Якщо назва міста не закінчується на -ськ/-зьк/-цьк (не є прикметниковою основою),
+    // додаємо негативний lookahead щоб виключити збіг всередині прикметникових форм
+    // (напр. "Вінниця" не має матчитися в "Вінницька область").
+    for (const city of this.allCities) {
+      if (localitiesFound.has(city)) continue;
+      const stem = city.replace(/район|область/gi, '').trim();
+      if (stem.length < 3) continue;
+      const baseStem = stem.length > 5 ? stem.slice(0, -1) : stem;
+      // Перевіряємо чи сама назва міста є прикметниковою (напр. Луцьк, Дрогобич не є)
+      const hasSzkSuffix = /[сцз]ьк$/i.test(stem);
+      let regex;
+      if (hasSzkSuffix) {
+        // Місто типу "Луцьк" — стандартний regex
+        regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}[а-я]*(?:[^\\p{L}\\d_]|$)`, 'iu');
+      } else {
+        // Місто типу "Вінниця" — забороняємо прикметникові суфікси після основи
+        regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}(?![а-я]*[сцз]ьк)[а-я]*(?:[^\\p{L}\\d_]|$)`, 'iu');
+      }
+      if (regex.test(t)) {
+        localitiesFound.add(city);
+        const dist = this.cityDistrictMap[city];
+        if (dist) districtsFound.add(dist);
+        const obl = this.cityOblastMap[city];
+        if (obl) oblastsFound.add(obl);
+      }
+    }
+
+    // 4. Сканування районів за словником
+    for (const dist of this.allDistricts) {
+      if (districtsFound.has(dist)) continue;
+      const stem = dist.replace(/район/gi, '').trim();
+      const baseStem = stem.length > 5 ? stem.slice(0, -2) : stem;
+      const regex = new RegExp(`(?:^|[^\\p{L}\\d_])${baseStem}[а-я]*\\s+район`, 'iu');
+      if (regex.test(t)) {
+        districtsFound.add(dist);
+        const obl = this.districtOblastMap[dist];
+        if (obl) oblastsFound.add(obl);
+      }
+    }
+
+    // 5. Сканування інших областей
+    const oblastSuffixPatterns = [
+      { name: 'Волинська область', re: /волинськ[а-я]*\s+обл|волинь/i },
+      { name: 'Донецька область', re: /донецьк[а-я]*\s+обл|донеччин/i },
+      { name: 'Житомирська область', re: /житомирськ[а-я]*\s+обл|житомирщин/i },
+      { name: 'Закарпатська область', re: /закарпатськ[а-я]*\s+обл|закарпатт/i },
+      { name: 'Запорізька область', re: /запорізьк[а-я]*\s+обл|запоріжж/i },
+      { name: 'Івано-Франківська область', re: /івано-франківськ[а-я]*\s+обл|прикарпатт/i },
+      { name: 'Кіровоградська область', re: /кіровоградськ[а-я]*\s+обл|кропивниччин|кіровоградщин/i },
+      { name: 'Луганська область', re: /луганськ[а-я]*\s+обл|луганщин/i },
+      { name: 'Львівська область', re: /львівськ[а-я]*\s+обл|львівщин/i },
+      { name: 'Одеська область', re: /одеськ[а-я]*\s+обл|одещин/i },
+      { name: 'Рівненська область', re: /рівненськ[а-я]*\s+обл|рівненщин/i },
+      { name: 'Сумська область', re: /сумськ[а-я]*\s+обл|сумщин/i },
+      { name: 'Тернопільська область', re: /тернопільськ[а-я]*\s+обл|тернопільщин/i },
+      { name: 'Харківська область', re: /харківськ[а-я]*\s+обл|харківщин/i },
+      { name: 'Херсонська область', re: /херсонськ[а-я]*\s+обл|херсонщин/i },
+      { name: 'Хмельницька область', re: /хмельницьк[а-я]*\s+обл|хмельниччин/i },
+      { name: 'Черкаська область', re: /черкаськ[а-я]*\s+обл|черкащин/i },
+      { name: 'Чернівецька область', re: /чернівецьк[а-я]*\s+обл|буковин/i },
+      { name: 'Чернігівська область', re: /чернігівськ[а-я]*\s+обл|чернігівщин/i }
+    ];
+
+    for (const item of oblastSuffixPatterns) {
+      if (!oblastsFound.has(item.name) && item.re.test(t)) {
+        oblastsFound.add(item.name);
+      }
+    }
+
+    const totalFound = oblastsFound.size + districtsFound.size + localitiesFound.size;
+    const confidence = isNational ? 0.99 : (totalFound > 0 ? Math.min(0.95, 0.7 + totalFound * 0.1) : 0);
+
+    const localitiesArr = Array.from(localitiesFound);
+    const districtsArr  = Array.from(districtsFound);
+    const oblastsArr    = Array.from(oblastsFound);
+
+    let primaryPlace = '';
+    if (localitiesArr.length) primaryPlace = localitiesArr[0];
+    else if (districtsArr.length) primaryPlace = districtsArr[0];
+    else if (oblastsArr.length) primaryPlace = oblastsArr[0];
+    else if (isNational) primaryPlace = 'Вся Україна';
+
+    return {
+      territories: {
+        country: 'Україна',
+        oblasts: oblastsArr,
+        districts: districtsArr,
+        localities: localitiesArr
+      },
+      isNational,
+      confidence,
+      source: 'message_text',
+      primaryPlace
+    };
+  },
+
+  isMatchingTerritory(parsed, selectedRegion, selectedDistrict, showOblastWide = true) {
+    if (!selectedRegion || selectedRegion === 'all') {
+      return true;
+    }
+    if (parsed.isNational) {
+      return true;
+    }
+
+    const { oblasts, districts, localities } = parsed.territories || { oblasts: [], districts: [], localities: [] };
+    const hasAnyTerritory = oblasts.length > 0 || districts.length > 0 || localities.length > 0;
+    if (!hasAnyTerritory) {
+      // Якщо територія взагалі не розпізнана, НЕ показуємо в локальному фільтрі конкретного регіону/району
+      return false;
+    }
+
+    // Режим 1: Вибрано конкретний район
+    if (selectedDistrict && selectedDistrict !== 'all') {
+      // Прямий збіг району
+      if (districts.includes(selectedDistrict)) {
+        return true;
+      }
+      // Збіг населеного пункту всередині цього району
+      for (const loc of localities) {
+        if (this.cityDistrictMap[loc] === selectedDistrict) {
+          return true;
+        }
+      }
+      // Загальне повідомлення всієї області (якщо дозволено опцією)
+      const districtOblast = this.districtOblastMap[selectedDistrict] || selectedRegion;
+      if (showOblastWide && oblasts.includes(districtOblast)) {
+        // Якщо в повідомленні явно вказано ІНШИЙ район цієї ж області — це локальна подія іншого району, не показуємо
+        const conflictingDistrict = districts.some(d => d !== selectedDistrict && this.districtOblastMap[d] === districtOblast);
+        if (!conflictingDistrict) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Режим 2: Вибрано всю область (district === 'all')
+    if (selectedRegion && selectedRegion !== 'all') {
+      if (oblasts.includes(selectedRegion)) {
+        return true;
+      }
+      for (const dist of districts) {
+        if (this.districtOblastMap[dist] === selectedRegion) return true;
+      }
+      for (const loc of localities) {
+        if (this.cityOblastMap[loc] === selectedRegion) return true;
+      }
+      return false;
+    }
+
+    return true;
+  },
+
+  isNotificationRelevantForUser(notif) {
+    if (!notif) return true;
+
+    // Якщо користувач увімкнув лише "Обрані території" (зірочки) і список не порожній
+    if (FollowManager && FollowManager.followedSet && FollowManager.followedSet.size > 0) {
+      const place = notif.territory || '';
+      if (!FollowManager.matchesFollowed(place)) {
+        // Перевіряємо текст
+        const text = `${notif.title || ''} ${notif.message || ''}`.toLowerCase();
+        let matchesFollowed = false;
+        for (const f of FollowManager.followedSet) {
+          if (text.includes(f.toLowerCase())) { matchesFollowed = true; break; }
+        }
+        if (!matchesFollowed) return false;
+      }
+    }
+
+    // Перевірка за вибраною областю та районом
+    const selectedRegion = State.selectedRegion || 'all';
+    const selectedDistrict = State.selectedDistrict || 'all';
+    const showOblastWide = State.showEntireRegionWithDistrict !== false;
+
+    if (selectedRegion === 'all' && selectedDistrict === 'all') {
+      return true;
+    }
+
+    let parsed = notif.parsedTerritory;
+    if (!parsed) {
+      const combinedText = `${notif.title || ''} ${notif.message || ''} ${notif.territory || ''}`;
+      parsed = this.resolveMessageTerritory(combinedText, notif.source || '');
+      notif.parsedTerritory = parsed;
+    }
+
+    return this.isMatchingTerritory(parsed, selectedRegion, selectedDistrict, showOblastWide);
   },
 
   search(query) {
@@ -2956,6 +3649,124 @@ const TerritoriesManager = {
     }
 
     return { active: false, level: null };
+  }
+};
+
+/* ============================================================
+   11.5. ЦЕНТРАЛІЗОВАНИЙ ГЛОБАЛЬНИЙ ФІЛЬТР ТЕРИТОРІЙ
+   Єдина точка фільтрації для ВСІХ типів сповіщень.
+   Використовується NotificationDispatcher.dispatch() та всіма
+   компонентами, що генерують сповіщення.
+============================================================ */
+const GlobalTerritoryFilter = {
+
+  /**
+   * Перевіряє, чи повинна подія показуватися користувачу згідно
+   * з вибраними ним територіями (State.selectedRegion / selectedDistrict).
+   *
+   * @param {object} event — нормалізована структура події:
+   *   type            : 'OFFICIAL_ALERT' | 'THREAT' | 'LAUNCH' | 'INFORMATION' | 'AI_ANALYSIS'
+   *   oblastKey       : точний ключ з API (для офіційних тривог)
+   *   oblastName      : назва області/міста з API
+   *   apiRegion       : регіон з API (для цілей)
+   *   apiDistrict     : район з API (для цілей)
+   *   apiLocality     : населений пункт з API (для цілей)
+   *   areaOnly        : true → координати є центроїдом, не використовуємо для прив'язки
+   *   text            : повний текст повідомлення для NLP
+   *   title           : заголовок
+   *   source          : назва каналу / джерела
+   *   place           : підказка-рядок (запасна)
+   *   parsedTerritory : кешований результат TerritoriesManager.resolveMessageTerritory
+   * @returns {boolean}
+   */
+  passes(event) {
+    if (!event) return true;
+
+    const sel  = State.selectedRegion   || 'all';
+    const dist = State.selectedDistrict || 'all';
+
+    // Якщо користувач не вибрав конкретну територію — показуємо все
+    if (sel === 'all' && dist === 'all') return true;
+
+    // ── Офіційні тривоги (OFFICIAL_ALERT) ─────────────────────────────────────
+    // Використовуємо точне зіставлення ключа/назви з API, без NLP.
+    if (event.type === 'OFFICIAL_ALERT') {
+      if (sel === 'all') return true;
+      const normSel  = normalizeName(sel);
+      const normKey  = normalizeName(event.oblastKey  || '');
+      const normName = normalizeName(event.oblastName || '');
+      // Пряме зіставлення: ключ API, назва API, або без суфікса "область"
+      const normSelStripped = normSel.replace(/\s+область$/, '').trim();
+      return normKey  === normSel
+          || normName === normSel
+          || normKey  === normSelStripped
+          || normName === normSelStripped;
+    }
+
+    // ── Реальні цілі та запуски (THREAT / LAUNCH) ──────────────────────────────
+    // Використовуємо явні поля API: region, district, locality.
+    // Якщо areaOnly: true — координати є центроїдом, НЕ використовуємо їх як точне місце.
+    if (event.type === 'THREAT' || event.type === 'LAUNCH') {
+      const placeStr = [
+        event.apiLocality,
+        event.apiDistrict,
+        event.apiRegion
+      ].filter(Boolean).join(' ');
+
+      if (!placeStr && !event.text) {
+        // Немає жодних достовірних даних про місце — не показуємо в конкретному регіоні
+        return false;
+      }
+
+      let parsed = event.parsedTerritory;
+      if (!parsed && typeof TerritoriesManager !== 'undefined') {
+        const combined = `${placeStr} ${event.text || ''}`.trim();
+        parsed = TerritoriesManager.resolveMessageTerritory(combined, event.source || '');
+        event.parsedTerritory = parsed;
+      }
+      if (!parsed) return false;
+
+      return TerritoriesManager.isMatchingTerritory(
+        parsed, sel, dist, State.showEntireRegionWithDistrict !== false
+      );
+    }
+
+    // ── INFORMATION / AI_ANALYSIS / решта — NLP за текстом ─────────────────────
+    let parsed = event.parsedTerritory;
+    if (!parsed && typeof TerritoriesManager !== 'undefined') {
+      const combined = `${event.title || ''} ${event.text || event.body || ''} ${event.place || ''}`.trim();
+      parsed = TerritoriesManager.resolveMessageTerritory(combined, event.source || '');
+      event.parsedTerritory = parsed;
+    }
+    if (!parsed) return false;
+
+    return TerritoriesManager.isMatchingTerritory(
+      parsed, sel, dist, State.showEntireRegionWithDistrict !== false
+    );
+  },
+
+  /**
+   * Викликати при зміні вибраної території.
+   * Реактивно перебудовує всі залежні UI-компоненти без reload.
+   */
+  onTerritoryChanged() {
+    // Перебудова вкладки «Сповіщення»
+    if (typeof TelegramFeedService !== 'undefined') {
+      TelegramFeedService.syncDistrictDropdown();
+      TelegramFeedService.render();
+    }
+    // Перебудова вкладки «Тривоги»
+    if (typeof AlertsService !== 'undefined') {
+      AlertsService.updateCounters();
+      if (NavigationController?.currentTab === 'alerts') {
+        AlertsService.render();
+      }
+    }
+    // Оновлення слідкування та лічильників
+    if (typeof FollowManager !== 'undefined') FollowManager.renderFollowedList();
+    if (typeof UIController !== 'undefined') UIController.updateCounters?.();
+    // ШІ вкладка
+    if (typeof AIService !== 'undefined') AIService?.render?.();
   }
 };
 
@@ -3162,7 +3973,7 @@ const AlertsService = {
     // Оновлюємо чіп на карті
     const chipText = document.getElementById('map-alerts-chip-text');
     if (chipText) {
-      chipText.textContent = total > 0 ? `🚨 ${total} тривог` : '🟢 Спокійно';
+      chipText.textContent = total > 0 ? `Тривог: ${total}` : 'Спокійно';
     }
   },
 
@@ -3226,7 +4037,12 @@ const AlertsService = {
         ? 'border-emerald-500/25 hover:border-emerald-500/50'
         : (isYellow ? 'border-yellow-500/30 hover:border-yellow-500/60' : 'border-red-500/30 hover:border-red-500/60');
 
-      const icon = isHistory ? '✅' : (isYellow ? '🟡' : '🔴');
+      const iconSvg = isHistory
+        ? `<svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+        : (isYellow
+            ? `<svg class="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+            : `<svg class="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`);
+
       const levelTitle = isHistory
         ? 'ВІДБІЙ ТРИВОГИ'
         : (isYellow ? 'ЖОВТИЙ РІВЕНЬ (ПІДВИЩЕНА НЕБЕЗПЕКА)' : 'ПОВІТРЯНА ТРИВОГА');
@@ -3246,7 +4062,7 @@ const AlertsService = {
         <article class="p-3 sm:p-4 rounded-xl border ${borderColor} bg-black/40 hover:bg-black/60 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
           <div class="flex items-start gap-3 flex-1 min-w-0">
             <div class="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-base ${badgeColor} border flex-shrink-0 mt-0.5">
-              ${icon}
+              ${iconSvg}
             </div>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -3258,8 +4074,8 @@ const AlertsService = {
               ${reasonsHtml}
 
               <div class="text-[11px] font-mono text-gray-400 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span>⏰ <span class="text-gray-400">Початок:</span> <b class="text-gray-200">${formattedTime}</b></span>
-                ${durationStr ? `<span class="${isYellow ? 'text-yellow-400' : (isHistory ? 'text-gray-400' : 'text-amber-400')}">⏳ <span class="text-gray-400">${isHistory ? 'Тривала:' : 'Триває:'}</span> <b>${durationStr}</b></span>` : ''}
+                <span><span class="text-gray-400">Початок:</span> <b class="text-gray-200">${formattedTime}</b></span>
+                ${durationStr ? `<span class="${isYellow ? 'text-yellow-400' : (isHistory ? 'text-gray-400' : 'text-amber-400')}"><span class="text-gray-400">${isHistory ? 'Тривала:' : 'Триває:'}</span> <b>${durationStr}</b></span>` : ''}
                 <span class="text-gray-500 text-[10px]">Джерело: NEPTUN</span>
               </div>
             </div>
@@ -3267,7 +4083,8 @@ const AlertsService = {
 
           <div class="flex-shrink-0 self-end sm:self-center flex items-center gap-2">
             <button class="px-3 py-1.5 rounded-lg text-xs font-mono font-semibold bg-sky-600/20 hover:bg-sky-600 text-sky-200 hover:text-white border border-sky-500/30 transition-all flex items-center gap-1.5" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${targetPlace}'); MapService.selectAndShowDistrict('${targetPlace}', true);">
-              <span>🗺️</span> <span>На карті</span>
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+              <span>На карті</span>
             </button>
           </div>
         </article>`;
@@ -3349,10 +4166,14 @@ const UIController = {
     if (nameEl)      nameEl.textContent = name;
     if (parentEl)    parentEl.textContent = districtName ? `${districtName}, ${regionName}` : regionName;
     if (typeBadgeEl) typeBadgeEl.textContent = isCity ? 'МІСТО' : 'РАЙОН';
-    if (iconEl)      iconEl.textContent = isCity ? '🏙' : '📍';
+    if (iconEl) {
+      iconEl.innerHTML = isCity
+        ? '<svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v8h4"/><path d="M18 9h2a2 2 0 0 1 2 2v11h-4"/></svg>'
+        : '<svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"/><circle cx="12" cy="10" r="3"/></svg>';
+    }
 
     const isStarred = FollowManager.isFollowed(name);
-    if (starText) starText.textContent = isStarred ? 'Відстежується ★' : 'Слідкувати ☆';
+    if (starText) starText.textContent = isStarred ? 'Відстежується' : 'Слідкувати';
     if (starBtn) {
       starBtn.className = isStarred
         ? 'px-2 py-1 rounded-lg border border-amber-400 bg-amber-500/30 text-amber-200 font-mono text-[10px] font-bold flex items-center gap-1 transition-all'
@@ -3381,7 +4202,7 @@ const UIController = {
     const formatStatus = (a) => {
       if (!a) return '<span class="font-bold text-emerald-400">СПОКІЙНО (Тривога: НІ)</span>';
       const c = getAlertColor(a.level);
-      return `<span class="font-bold text-white px-1.5 py-0.5 rounded text-[10px]" style="background-color: ${c}">🚨 ТРИВОГА [${(a.level || 'RED').toUpperCase()}]</span>`;
+      return `<span class="font-bold text-white px-1.5 py-0.5 rounded text-[10px]" style="background-color: ${c}">ТРИВОГА [${(a.level || 'RED').toUpperCase()}]</span>`;
     };
 
     if (statusCityEl) statusCityEl.innerHTML = formatStatus(cityAlert || distAlert || regAlert);
@@ -3438,20 +4259,20 @@ const UIController = {
       }
 
       dropdown.innerHTML = results.map(item => {
-        let icon = '🏛';
+        let iconSvg = '<svg class="w-3.5 h-3.5 text-purple-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 10h18M5 10v11M19 10v11M9 10v11M15 10v11M12 3l9 7H3z"/></svg>';
         let typeBadge = '<span class="text-[9px] text-purple-400 font-bold">ОБЛАСТЬ</span>';
         let subtext = 'Адміністративна область';
 
         if (item.name === 'Київ' || item.name === 'Севастополь') {
-          icon = '🏙';
+          iconSvg = '<svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v8h4"/><path d="M18 9h2a2 2 0 0 1 2 2v11h-4"/></svg>';
           typeBadge = '<span class="text-[9px] text-emerald-400 font-bold">СПЕЦ. СТАТУС</span>';
           subtext = 'Місто зі спеціальним статусом';
         } else if (item.type === 'city') {
-          icon = '🏙';
+          iconSvg = '<svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v8h4"/><path d="M18 9h2a2 2 0 0 1 2 2v11h-4"/></svg>';
           typeBadge = '<span class="text-[9px] text-emerald-400 font-bold">МІСТО</span>';
           subtext = `${item.districtName ? item.districtName + ', ' : ''}${item.regionName}`;
         } else if (item.type === 'district') {
-          icon = '📍';
+          iconSvg = '<svg class="w-3.5 h-3.5 text-sky-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"/><circle cx="12" cy="10" r="3"/></svg>';
           typeBadge = '<span class="text-[9px] text-sky-400 font-bold">РАЙОН</span>';
           subtext = item.regionName;
         }
@@ -3465,7 +4286,7 @@ const UIController = {
         return `
           <div class="flex items-center justify-between p-2 rounded-lg hover:bg-white/10 cursor-pointer border border-transparent hover:border-white/10 transition-colors" data-name="${item.name}">
             <div class="flex items-center gap-2 truncate">
-              <span class="text-sm">${icon}</span>
+              <span class="flex-shrink-0">${iconSvg}</span>
               <div class="truncate">
                 <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-gray-100">${item.name}</span>${typeBadge}</div>
                 <div class="text-[10px] text-gray-400 truncate">${subtext}</div>
@@ -3473,7 +4294,9 @@ const UIController = {
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
               ${statusBadge}
-              <button class="star-btn ${isStarred ? 'text-amber-400' : 'text-gray-400 hover:text-amber-300'} text-sm p-1" data-name="${item.name}" title="Слідкувати">${isStarred ? '★' : '☆'}</button>
+              <button class="star-btn ${isStarred ? 'text-amber-400' : 'text-gray-400 hover:text-amber-300'} p-1" data-name="${item.name}" title="Слідкувати">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="${isStarred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              </button>
             </div>
           </div>`;
       }).join('');
@@ -3548,11 +4371,11 @@ const UIController = {
           return `
             <div class="pl-3 border-l border-white/10 my-1">
               <div class="flex items-center justify-between p-1 hover:bg-white/5 rounded cursor-pointer group" onclick="MapService.selectAndShowDistrict('${dist.name}', true); document.getElementById('territory-tree-modal').classList.add('hidden');">
-                <span class="font-semibold text-gray-200 group-hover:text-sky-300">📍 ${dist.name}</span>
+                <span class="font-semibold text-gray-200 group-hover:text-sky-300">${dist.name}</span>
                 <div class="flex items-center gap-2">
                   ${dBadge}
-                  <button onclick="event.stopPropagation(); FollowManager.toggleFollowByName('${dist.name}'); UIController.bindTreeModal();" class="text-xs ${isDStarred ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}">
-                    ${isDStarred ? '★' : '☆'}
+                  <button onclick="event.stopPropagation(); FollowManager.toggleFollowByName('${dist.name}'); UIController.bindTreeModal();" class="p-1 ${isDStarred ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}" title="Слідкувати">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="${isDStarred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                   </button>
                 </div>
               </div>
@@ -3564,13 +4387,13 @@ const UIController = {
           <div class="p-2 rounded-xl bg-black/40 border border-white/10 mb-2">
             <div class="flex items-center justify-between cursor-pointer group" onclick="MapService.flyToRegion('${reg.name}'); document.getElementById('territory-tree-modal').classList.add('hidden');">
               <div class="flex items-center gap-2">
-                <span class="text-sm">🏛</span>
+                <svg class="w-4 h-4 text-purple-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 10h18M5 10v11M19 10v11M9 10v11M15 10v11M12 3l9 7H3z"/></svg>
                 <span class="font-bold text-sm text-white group-hover:text-sky-300">${reg.name}</span>
               </div>
               <div class="flex items-center gap-2">
                 ${regBadge}
-                <button onclick="event.stopPropagation(); FollowManager.toggleFollowByName('${reg.name}'); UIController.bindTreeModal();" class="text-sm ${isRegStarred ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}">
-                  ${isRegStarred ? '★' : '☆'}
+                <button onclick="event.stopPropagation(); FollowManager.toggleFollowByName('${reg.name}'); UIController.bindTreeModal();" class="p-1 ${isRegStarred ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}" title="Слідкувати">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="${isRegStarred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 </button>
               </div>
             </div>
@@ -3591,11 +4414,46 @@ const UIController = {
 
     document.getElementById('select-region')?.addEventListener('change', (e) => {
       State.selectedRegion = e.target.value;
+      State.selectedDistrict = 'all';
+      localStorage.setItem('radar_selected_region', State.selectedRegion);
+      localStorage.setItem('radar_selected_district', 'all');
+
+      const tgRegionSelect = document.getElementById('tg-select-region');
+      if (tgRegionSelect) tgRegionSelect.value = State.selectedRegion;
+      const setRegSelect = document.getElementById('setting-selected-region');
+      if (setRegSelect) setRegSelect.value = State.selectedRegion;
+
       MapService.flyToRegion(State.selectedRegion);
       FeedService.render();
+      TelegramFeedService.syncDistrictDropdown();
       TelegramFeedService.render();
       AIService?.render();
     });
+
+    // Мобільна шторка панелі фільтрів (щоб карта не перекривалася на телефоні)
+    const btnMobileTogglePanel = document.getElementById('btn-mobile-toggle-panel');
+    const btnCloseLeftPanel    = document.getElementById('btn-close-left-panel');
+    const leftPanelBackdrop    = document.getElementById('left-panel-backdrop');
+    const leftPanel            = document.getElementById('left-panel');
+
+    const openMobilePanel = () => {
+      leftPanel?.classList.remove('hidden');
+      leftPanel?.classList.add('mobile-open');
+      leftPanelBackdrop?.classList.remove('hidden');
+    };
+
+    const closeMobilePanel = () => {
+      leftPanel?.classList.remove('mobile-open');
+      if (window.innerWidth < 640) {
+        leftPanel?.classList.add('hidden');
+      }
+      leftPanelBackdrop?.classList.add('hidden');
+      setTimeout(() => MapService.map?.invalidateSize(), 100);
+    };
+
+    btnMobileTogglePanel?.addEventListener('click', openMobilePanel);
+    btnCloseLeftPanel?.addEventListener('click', closeMobilePanel);
+    leftPanelBackdrop?.addEventListener('click', closeMobilePanel);
 
     document.getElementById('btn-status-active')?.addEventListener('click', () => {
       State.statusFilter = 'active';
@@ -3614,7 +4472,7 @@ const UIController = {
     document.getElementById('btn-clear-session-history')?.addEventListener('click', () => {
       State.history = [];
       FeedService.render();
-      showToast('🗑 Історію очищено');
+      showToast('Історію очищено');
     });
 
     document.getElementById('btn-toggle-fullscreen')?.addEventListener('click', () => {
@@ -3713,20 +4571,95 @@ const UIController = {
     const modal          = document.getElementById('settings-modal');
     const btnOpen        = document.getElementById('btn-open-settings');
     const btnClose       = document.getElementById('btn-close-settings');
-    const btnSave          = document.getElementById('btn-save-settings');
-    const notifCheck       = document.getElementById('setting-notifications-enabled');
-    const officialCheck    = document.getElementById('setting-official-alerts-enabled');
-    const threatsCheck     = document.getElementById('setting-threats-alerts-enabled');
-    const launchesCheck    = document.getElementById('setting-launches-alerts-enabled');
-    const infoCheck        = document.getElementById('setting-info-messages-enabled');
-    const urgentCheck      = document.getElementById('setting-urgent-alerts-enabled');
-    const soundCheck       = document.getElementById('setting-sound-enabled');
-    const quietCheck       = document.getElementById('setting-quiet-hours');
-    const opRange          = document.getElementById('setting-zone-opacity');
-    const opLabel          = document.getElementById('label-zone-opacity');
-    const layerAlerts      = document.getElementById('setting-layer-alerts');
-    const layerThreats     = document.getElementById('setting-layer-threats');
-    const animCheck        = document.getElementById('setting-enable-animations');
+    const btnSave        = document.getElementById('btn-save-settings');
+    const notifCheck     = document.getElementById('setting-notifications-enabled');
+    const officialCheck  = document.getElementById('setting-official-alerts-enabled');
+    const threatsCheck   = document.getElementById('setting-threats-alerts-enabled');
+    const launchesCheck  = document.getElementById('setting-launches-alerts-enabled');
+    const infoCheck      = document.getElementById('setting-info-messages-enabled');
+    const urgentCheck    = document.getElementById('setting-urgent-alerts-enabled');
+    const soundCheck     = document.getElementById('setting-sound-enabled');
+    const quietCheck     = document.getElementById('setting-quiet-hours');
+    const opRange        = document.getElementById('setting-zone-opacity');
+    const opLabel        = document.getElementById('label-zone-opacity');
+    const layerAlerts    = document.getElementById('setting-layer-alerts');
+    const layerThreats   = document.getElementById('setting-layer-threats');
+    const animCheck      = document.getElementById('setting-enable-animations');
+
+    // Фільтрація сповіщень за районами та областями
+    const settingRegionSelect      = document.getElementById('setting-selected-region');
+    const settingDistrictSelect    = document.getElementById('setting-selected-district');
+    const settingDistrictContainer = document.getElementById('setting-district-container');
+    const settingShowOblastWide    = document.getElementById('setting-show-oblast-wide');
+
+    settingRegionSelect?.addEventListener('change', (e) => {
+      const reg = e.target.value;
+      if (reg && reg !== 'all') {
+        settingDistrictContainer?.classList.remove('hidden');
+        const districts = (window.TerritoriesManager && typeof TerritoriesManager.getDistrictsForOblast === 'function')
+          ? TerritoriesManager.getDistrictsForOblast(reg)
+          : [];
+        if (settingDistrictSelect) {
+          settingDistrictSelect.innerHTML = `<option value="all">Усі райони (${reg})</option>` +
+            districts.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+          settingDistrictSelect.value = 'all';
+        }
+      } else {
+        settingDistrictContainer?.classList.add('hidden');
+        if (settingDistrictSelect) settingDistrictSelect.innerHTML = `<option value="all">Усі райони</option>`;
+      }
+    });
+
+    // Персональна небезпека (Вимога Розділу 11)
+    const geoCheck            = document.getElementById('setting-geo-enabled');
+    const geoSuboptions       = document.getElementById('personal-danger-suboptions');
+    const radiusSelect        = document.getElementById('setting-personal-radius');
+    const customRadiusBox     = document.getElementById('personal-radius-custom-box');
+    const customRadiusInput   = document.getElementById('setting-personal-radius-custom');
+    const radiusHint          = document.getElementById('personal-danger-status-hint');
+    const personalNotifCheck  = document.getElementById('setting-personal-notif');
+    const personalUrgentCheck = document.getElementById('setting-personal-urgent');
+    const personalSoundCheck  = document.getElementById('setting-personal-sound');
+
+    const updateGeoSuboptionsState = (enabled) => {
+      if (geoSuboptions) {
+        geoSuboptions.classList.toggle('opacity-50', !enabled);
+        geoSuboptions.classList.toggle('pointer-events-none', !enabled);
+      }
+    };
+
+    const updateRadiusHint = (rad) => {
+      if (radiusHint) {
+        radiusHint.textContent = `Високий рівень: ціль у радіусі ${rad} км`;
+      }
+    };
+
+    geoCheck?.addEventListener('change', async (e) => {
+      if (e.target.checked) {
+        const granted = await PersonalDangerService.enableWithPermission();
+        if (!granted) {
+          e.target.checked = false;
+          showToast('Дозвіл на доступ до геолокації не надано');
+        }
+      } else {
+        PersonalDangerService.disable();
+      }
+      updateGeoSuboptionsState(geoCheck.checked);
+    });
+
+    radiusSelect?.addEventListener('change', (e) => {
+      const isCustom = e.target.value === 'custom';
+      if (customRadiusBox) {
+        customRadiusBox.classList.toggle('hidden', !isCustom);
+      }
+      const rad = isCustom ? (parseFloat(customRadiusInput?.value) || 10) : parseFloat(e.target.value);
+      updateRadiusHint(rad);
+    });
+
+    customRadiusInput?.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value) || 10;
+      updateRadiusHint(val);
+    });
 
     // ШІ налаштування (Вимога п.7)
     const aiMasterCheck    = document.getElementById('setting-ai-master-enabled');
@@ -3775,6 +4708,27 @@ const UIController = {
       if (layerThreats)    layerThreats.checked    = s.layerThreats;
       if (animCheck)       animCheck.checked       = s.enableAnimations;
 
+      // Персональна небезпека
+      const geoOn = s.geoEnabled === true;
+      if (geoCheck) geoCheck.checked = geoOn;
+      updateGeoSuboptionsState(geoOn);
+
+      const currentRadius = s.personalDangerRadiusKm || 10;
+      const standardRadii = ['5', '10', '15', '20'];
+      if (standardRadii.includes(String(currentRadius))) {
+        if (radiusSelect) radiusSelect.value = String(currentRadius);
+        if (customRadiusBox) customRadiusBox.classList.add('hidden');
+      } else {
+        if (radiusSelect) radiusSelect.value = 'custom';
+        if (customRadiusBox) customRadiusBox.classList.remove('hidden');
+        if (customRadiusInput) customRadiusInput.value = currentRadius;
+      }
+      updateRadiusHint(currentRadius);
+
+      if (personalNotifCheck)  personalNotifCheck.checked  = s.personalDangerNotif !== false;
+      if (personalUrgentCheck) personalUrgentCheck.checked = s.personalDangerUrgent !== false;
+      if (personalSoundCheck)  personalSoundCheck.checked  = s.personalDangerSound !== false;
+
       // Завантаження стану ШІ
       const aiOn = s.aiEnabled === true;
       if (aiMasterCheck)   aiMasterCheck.checked   = aiOn;
@@ -3785,6 +4739,26 @@ const UIController = {
       if (aiTypeLaunches)  aiTypeLaunches.checked  = s.aiTypeLaunches !== false;
       if (aiTypeInfo)      aiTypeInfo.checked      = s.aiTypeInfo !== false;
       updateAiSuboptionsState(aiOn);
+
+      // Територія та райони сповіщень
+      if (settingRegionSelect) settingRegionSelect.value = State.selectedRegion || 'all';
+      if (State.selectedRegion && State.selectedRegion !== 'all') {
+        settingDistrictContainer?.classList.remove('hidden');
+        const districts = (window.TerritoriesManager && typeof TerritoriesManager.getDistrictsForOblast === 'function')
+          ? TerritoriesManager.getDistrictsForOblast(State.selectedRegion)
+          : [];
+        if (settingDistrictSelect) {
+          settingDistrictSelect.innerHTML = `<option value="all">Усі райони (${State.selectedRegion})</option>` +
+            districts.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+          settingDistrictSelect.value = State.selectedDistrict || 'all';
+        }
+      } else {
+        settingDistrictContainer?.classList.add('hidden');
+        if (settingDistrictSelect) settingDistrictSelect.innerHTML = `<option value="all">Усі райони</option>`;
+      }
+      if (settingShowOblastWide) {
+        settingShowOblastWide.checked = State.showEntireRegionWithDistrict !== false;
+      }
 
       modal?.classList.remove('hidden');
     };
@@ -3801,29 +4775,29 @@ const UIController = {
     notifCheck?.addEventListener('change', async () => {
       if (notifCheck.checked) {
         const ok = await NotificationManager.requestPermission();
-        if (!ok) { notifCheck.checked = false; showToast('⚠️ Дозвіл на сповіщення відхилено.'); }
+        if (!ok) { notifCheck.checked = false; showToast('Дозвіл на сповіщення відхилено'); }
       }
     });
 
     document.getElementById('btn-test-alert')?.addEventListener('click', () => {
       SoundService.playAlertSiren();
-      showToast('🔊 Тест: Оголошення тривоги');
+      showToast('Тест: Оголошення тривоги');
     });
 
     document.getElementById('btn-test-clear')?.addEventListener('click', () => {
       SoundService.playClearSound();
-      showToast('🔊 Тест: Відбій тривоги');
+      showToast('Тест: Відбій тривоги');
     });
 
     document.getElementById('btn-test-urgent')?.addEventListener('click', () => {
       SoundService.playUrgentSiren();
-      showToast('🔊 Тест: Високий рівень небезпеки', true);
+      showToast('Тест: Високий рівень небезпеки', true);
     });
 
     const testSoundBtn = document.getElementById('btn-test-sound');
     testSoundBtn?.addEventListener('click', () => {
       SoundService.playAlertSiren();
-      showToast('🔊 Тест звуку: Оголошення тривоги');
+      showToast('Тест звуку: Оголошення тривоги');
     });
 
     btnSave?.addEventListener('click', () => {
@@ -3831,37 +4805,78 @@ const UIController = {
       btnSave.disabled = true;
       btnSave.textContent = 'Збереження...';
 
+      let personalRad = 10;
+      if (radiusSelect?.value === 'custom') {
+        personalRad = Math.max(1, Math.min(200, parseFloat(customRadiusInput?.value) || 10));
+      } else {
+        personalRad = parseFloat(radiusSelect?.value || '10') || 10;
+      }
+
+      const isGeoEnabled = geoCheck?.checked === true;
+
+      const chosenRegion     = settingRegionSelect?.value || 'all';
+      const chosenDistrict   = settingDistrictSelect?.value || 'all';
+      const chosenOblastWide = settingShowOblastWide?.checked !== false;
+
+      State.selectedRegion = chosenRegion;
+      State.selectedDistrict = chosenDistrict;
+      State.showEntireRegionWithDistrict = chosenOblastWide;
+
+      localStorage.setItem('radar_selected_region', chosenRegion);
+      localStorage.setItem('radar_selected_district', chosenDistrict);
+      localStorage.setItem('radar_show_oblast_wide', chosenOblastWide);
+
+      const selMain = document.getElementById('select-region');
+      if (selMain) selMain.value = chosenRegion;
+      const tgReg = document.getElementById('tg-select-region');
+      if (tgReg) tgReg.value = chosenRegion;
+
+      TelegramFeedService.syncDistrictDropdown();
+      TelegramFeedService.render();
+
       const updated = {
-        notificationsEnabled:  notifCheck?.checked || false,
-        officialAlertsEnabled: officialCheck?.checked !== false,
-        threatsAlertsEnabled:  threatsCheck?.checked !== false,
-        launchesAlertsEnabled: launchesCheck?.checked !== false,
-        infoMessagesEnabled:   infoCheck?.checked !== false,
-        urgentAlertsEnabled:   urgentCheck?.checked !== false,
-        aiEnabled:             aiMasterCheck?.checked === true,
-        aiAnalyzeMessages:     aiAnalyzeCheck?.checked !== false,
-        aiNotifications:       aiNotifCheck?.checked === true,
-        aiRegions:             aiRegionsSelect?.value || 'all',
-        aiTypeThreats:         aiTypeThreats?.checked !== false,
-        aiTypeLaunches:        aiTypeLaunches?.checked !== false,
-        aiTypeInfo:            aiTypeInfo?.checked !== false,
-        aiTabVisible:          true,
-        soundEnabled:          soundCheck?.checked !== false,
-        quietHours:            quietCheck?.checked || false,
-        zoneOpacity:           parseFloat(opRange?.value || 0.35),
-        layerAlerts:           layerAlerts?.checked !== false,
-        layerThreats:          layerThreats?.checked !== false,
-        enableAnimations:      animCheck?.checked !== false
+        notificationsEnabled:   notifCheck?.checked || false,
+        officialAlertsEnabled:  officialCheck?.checked !== false,
+        threatsAlertsEnabled:   threatsCheck?.checked !== false,
+        launchesAlertsEnabled:  launchesCheck?.checked !== false,
+        infoMessagesEnabled:    infoCheck?.checked !== false,
+        urgentAlertsEnabled:    urgentCheck?.checked !== false,
+        geoEnabled:             isGeoEnabled,
+        personalDangerRadiusKm: personalRad,
+        personalDangerNotif:    personalNotifCheck?.checked !== false,
+        personalDangerUrgent:   personalUrgentCheck?.checked !== false,
+        personalDangerSound:    personalSoundCheck?.checked !== false,
+        aiEnabled:              aiMasterCheck?.checked === true,
+        aiAnalyzeMessages:      aiAnalyzeCheck?.checked !== false,
+        aiNotifications:        aiNotifCheck?.checked === true,
+        aiRegions:              aiRegionsSelect?.value || 'all',
+        aiTypeThreats:          aiTypeThreats?.checked !== false,
+        aiTypeLaunches:         aiTypeLaunches?.checked !== false,
+        aiTypeInfo:             aiTypeInfo?.checked !== false,
+        aiTabVisible:           true,
+        soundEnabled:           soundCheck?.checked !== false,
+        quietHours:             quietCheck?.checked || false,
+        zoneOpacity:            parseFloat(opRange?.value || 0.35),
+        layerAlerts:            layerAlerts?.checked !== false,
+        layerThreats:           layerThreats?.checked !== false,
+        enableAnimations:       animCheck?.checked !== false
       };
       StorageManager.saveSettings(updated);
       NavigationController.applyTabVisibility();
       AIService?.updateEnabledState();
       AIService?.render();
+
+      if (isGeoEnabled) {
+        PersonalDangerService.startWatching(true);
+      } else {
+        PersonalDangerService.disable();
+      }
+
       modal?.classList.add('hidden');
       document.body.classList.toggle('disable-animations', !updated.enableAnimations);
       MapService.updateAllDistrictStyles();
       for (const t of State.threats.values()) MapService.updateThreat(t);
-      showToast(updated.aiEnabled ? '✅ Налаштування збережено (ШІ увімкнено)' : '✅ Налаштування збережено (ШІ вимкнено)');
+      showToast(updated.aiEnabled ? 'Налаштування збережено (ШІ увімкнено)' : 'Налаштування збережено (ШІ вимкнено)');
 
       setTimeout(() => {
         btnSave.disabled = false;
@@ -3892,6 +4907,7 @@ const SoundService = {
   clearAudio: null,
   urgentAudio: null,
   chimeAudio: null,
+  notificationAudio: null,  // звук інформаційного сповіщення (notification.mp3)
 
   init() {
     try {
@@ -3903,6 +4919,8 @@ const SoundService = {
       this.urgentAudio.preload = 'auto';
       this.chimeAudio = new Audio(`${BASE_PATH}sounds/chime.ogg`);
       this.chimeAudio.preload = 'auto';
+      this.notificationAudio = new Audio(`${BASE_PATH}sounds/notification.mp3`);
+      this.notificationAudio.preload = 'auto';
     } catch (e) {
       console.warn('[SoundService] Audio error:', e);
     }
@@ -3924,7 +4942,7 @@ const SoundService = {
   },
 
   stopAll() {
-    [this.sirenAudio, this.clearAudio, this.urgentAudio, this.chimeAudio].forEach(a => {
+    [this.sirenAudio, this.clearAudio, this.urgentAudio, this.chimeAudio, this.notificationAudio].forEach(a => {
       if (a) {
         try {
           a.pause();
@@ -3988,10 +5006,19 @@ const SoundService = {
     if (!s.soundEnabled || this.isQuietTime()) return;
 
     this.stopAll();
-    if (this.chimeAudio) {
-      this.chimeAudio.currentTime = 0;
-      this.chimeAudio.play().catch(() => {
-        this.synthesizeChime();
+    // Спочатку намагаємося відтворити notification.mp3 (завантажений користувачем звук),
+    // fallback — chime.ogg, і нарешті — синтезований звук.
+    const audio = this.notificationAudio || this.chimeAudio;
+    if (audio) {
+      audio.currentTime = 0;
+      audio.play().catch(() => {
+        // Якщо основний звук не відтворився — спробуємо резервний chime
+        if (this.notificationAudio && this.chimeAudio) {
+          this.chimeAudio.currentTime = 0;
+          this.chimeAudio.play().catch(() => this.synthesizeChime());
+        } else {
+          this.synthesizeChime();
+        }
       });
     } else {
       this.synthesizeChime();
@@ -4083,12 +5110,223 @@ const NotificationManager = {
       new Notification(title, {
         body,
         icon: isUrgent
-          ? 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚨</text></svg>'
-          : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>',
+          ? 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ef4444"><path d="M12 2L1 21h22L12 2zm0 3.5L20 19H4L12 5.5zM11 10v4h2v-4h-2zm0 6v2h2v-2h-2z"/></svg>'
+          : 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%230284c7"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>',
         tag,
         requireInteraction: isUrgent
       });
     } catch (e) {}
+  }
+};
+
+/* ============================================================
+   ПЕРСОНАЛЬНА НЕБЕЗПЕКА ТА ГЕОЛОКАЦІЯ (PersonalDangerService)
+   Повна конфіденційність: координати зберігаються тільки в пам'яті
+============================================================ */
+const PersonalDangerService = {
+  userCoords: null, // { lat, lon, accuracy, timestamp } (IN-MEMORY ONLY)
+  watchId: null,
+  previousLevel: 'NORMAL', // 'NORMAL' | 'ELEVATED' | 'HIGH'
+  minDistKm: null,
+  closestTarget: null,
+
+  init() {
+    const s = StorageManager.getSettings();
+    if (s.geoEnabled) {
+      this.startWatching(false);
+    }
+    document.getElementById('personal-danger-pill')?.addEventListener('click', () => {
+      UIController.openSettingsModal?.();
+    });
+  },
+
+  calculateDistanceKm(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Радіус Землі в км
+    const toRad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  },
+
+  async enableWithPermission() {
+    if (!('geolocation' in navigator)) {
+      showToast('Геолокація не підтримується цим браузером');
+      return false;
+    }
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          this.userCoords = {
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            timestamp: Date.now()
+          };
+          this.startWatching(true);
+          resolve(true);
+        },
+        () => {
+          this.disable();
+          resolve(false);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    });
+  },
+
+  startWatching(evaluateImmediately = true) {
+    if (!('geolocation' in navigator)) return;
+    if (this.watchId != null) {
+      navigator.geolocation.clearWatch(this.watchId);
+      this.watchId = null;
+    }
+
+    this.watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        this.userCoords = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          timestamp: Date.now()
+        };
+        const s = StorageManager.getSettings();
+        const radius = Number(s.personalDangerRadiusKm) || 10;
+        MapService.updateUserLocation(this.userCoords.lat, this.userCoords.lon, this.userCoords.accuracy, radius);
+        this.evaluate();
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+    );
+
+    if (evaluateImmediately && this.userCoords) {
+      const s = StorageManager.getSettings();
+      const radius = Number(s.personalDangerRadiusKm) || 10;
+      MapService.updateUserLocation(this.userCoords.lat, this.userCoords.lon, this.userCoords.accuracy, radius);
+      this.evaluate();
+    }
+  },
+
+  disable() {
+    if (this.watchId != null) {
+      navigator.geolocation.clearWatch(this.watchId);
+      this.watchId = null;
+    }
+    this.userCoords = null;
+    this.previousLevel = 'NORMAL';
+    this.minDistKm = null;
+    this.closestTarget = null;
+    MapService.removeUserLocation();
+    this.updateUI('DISABLED');
+  },
+
+  evaluate() {
+    const s = StorageManager.getSettings();
+    if (!s.geoEnabled || !this.userCoords) {
+      this.updateUI('DISABLED');
+      return;
+    }
+
+    const radius = Number(s.personalDangerRadiusKm) || 10;
+    let minDist = Infinity;
+    let closest = null;
+
+    for (const t of State.threats.values()) {
+      if (!t) continue;
+      // Ігноруємо неактивні цілі
+      if (t.status === 'inactive' || t.status === 'destroyed' || t.status === 'cancelled') continue;
+      // ВАЖЛИВО (п. 11.4): areaOnly === true — це центроїд адміністративної одиниці, а НЕ реальна точка цілі
+      if (t.areaOnly === true) continue;
+      // Перевірка валідності координат
+      if (!Array.isArray(t.coordinates) || t.coordinates.length < 2 ||
+          !Number.isFinite(t.coordinates[0]) || !Number.isFinite(t.coordinates[1])) {
+        continue;
+      }
+
+      const dist = this.calculateDistanceKm(
+        this.userCoords.lat,
+        this.userCoords.lon,
+        t.coordinates[0],
+        t.coordinates[1]
+      );
+
+      if (dist < minDist) {
+        minDist = dist;
+        closest = t;
+      }
+    }
+
+    this.minDistKm = (minDist !== Infinity) ? minDist : null;
+    this.closestTarget = closest;
+
+    let currentLevel = 'NORMAL';
+    if (this.minDistKm !== null) {
+      if (this.minDistKm <= radius) {
+        currentLevel = 'HIGH';
+      } else if (this.minDistKm <= radius * 1.5) {
+        currentLevel = 'ELEVATED';
+      }
+    }
+
+    // Подієве сповіщення: ТІЛЬКИ при переході в HIGH (п. 11.8, 11.9)
+    if (currentLevel === 'HIGH' && this.previousLevel !== 'HIGH') {
+      if (s.personalDangerNotif !== false && !isInitialLoad) {
+        NotificationDispatcher.dispatch({
+          id: `personal-danger-${Date.now()}`,
+          type: NOTIFICATION_CATEGORIES.THREAT,
+          title: 'Персональна небезпека',
+          message: `Реальна ціль (${closest?.title || 'БпЛА/ракета'}) знаходиться приблизно за ${this.minDistKm.toFixed(1)} км від вашого місцезнаходження.`,
+          isUrgent: s.personalDangerUrgent !== false,
+          isPersonal: true,
+          distanceKm: this.minDistKm,
+          time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }),
+          source: 'RADAR Geolocation'
+        });
+
+        if (s.personalDangerSound !== false && s.soundEnabled && !SoundService.isQuietTime()) {
+          SoundService.playUrgentSiren();
+        }
+      }
+    } else if (currentLevel === 'NORMAL' && this.previousLevel === 'HIGH') {
+      if (!isInitialLoad) {
+        showToast('Ціль вийшла з персонального радіуса небезпеки');
+      }
+    }
+
+    this.previousLevel = currentLevel;
+    this.updateUI(currentLevel, this.minDistKm, radius);
+  },
+
+  updateUI(level, distKm, radiusKm) {
+    const pill = document.getElementById('personal-danger-pill');
+    const dot = document.getElementById('personal-danger-dot');
+    const text = document.getElementById('personal-danger-text');
+    if (!pill || !dot || !text) return;
+
+    if (level === 'DISABLED') {
+      pill.classList.add('hidden');
+      return;
+    }
+
+    pill.classList.remove('hidden', 'personal-danger-high', 'personal-danger-elevated', 'personal-danger-normal');
+
+    if (level === 'HIGH') {
+      pill.classList.add('personal-danger-high');
+      dot.className = 'w-2 h-2 rounded-full bg-red-500 animate-ping';
+      text.textContent = `НЕБЕЗПЕКА: ціль ~${distKm.toFixed(1)} км`;
+    } else if (level === 'ELEVATED') {
+      pill.classList.add('personal-danger-elevated');
+      dot.className = 'w-2 h-2 rounded-full bg-amber-400';
+      text.textContent = `Увага: ціль ~${distKm.toFixed(1)} км`;
+    } else {
+      pill.classList.add('personal-danger-normal');
+      dot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+      text.textContent = `Безпечно (${radiusKm || 10} км)`;
+    }
   }
 };
 
@@ -4098,21 +5336,26 @@ const StorageManager = {
   },
 
   defaultSettings: {
-    notificationsEnabled:  false,
-    officialAlertsEnabled: true,
-    threatsAlertsEnabled:  true,
-    launchesAlertsEnabled: true,
-    infoMessagesEnabled:   true,
-    urgentAlertsEnabled:   true,
-    aiEnabled:             false, // Вимога п.6: ШІ за замовчуванням вимкнений!
-    aiAnalyzeMessages:     false,
-    aiNotifications:       false,
-    aiRegions:             'all',
-    aiTypeThreats:         true,
-    aiTypeLaunches:        true,
-    aiTypeInfo:            true,
-    aiTabVisible:          true,
-    soundEnabled:          true,
+    notificationsEnabled:   false,
+    officialAlertsEnabled:  true,
+    threatsAlertsEnabled:   true,
+    launchesAlertsEnabled:  true,
+    infoMessagesEnabled:    true,
+    urgentAlertsEnabled:    true,
+    geoEnabled:             false, // За замовчуванням вимкнено (Вимога п. 11.1)
+    personalDangerRadiusKm: 10,
+    personalDangerNotif:    true,
+    personalDangerUrgent:   true,
+    personalDangerSound:    true,
+    aiEnabled:              false, // Вимога п.6: ШІ за замовчуванням вимкнений!
+    aiAnalyzeMessages:      false,
+    aiNotifications:        false,
+    aiRegions:              'all',
+    aiTypeThreats:          true,
+    aiTypeLaunches:         true,
+    aiTypeInfo:             true,
+    aiTabVisible:           true,
+    soundEnabled:           true,
     quietHours:            false,
     zoneOpacity:           0.35,
     layerAlerts:           true,
@@ -4239,7 +5482,7 @@ const AIService = {
           cacheEl.textContent = `${res.cacheEntries || 0} записів`;
         }
 
-        if (notify) showToast('✅ Статус ШІ оновлено');
+        if (notify) showToast('Статус ШІ оновлено');
       } else {
         // Клієнтський режим для GitHub Pages
         const providerEl = document.getElementById('ai-provider-name');
@@ -4253,10 +5496,10 @@ const AIService = {
         if (cacheEl) {
           cacheEl.textContent = `${TelegramFeedService?.analyzedCache?.size || 0} записів`;
         }
-        if (notify) showToast('ℹ️ Режим: Клієнтський аналітичний NLP');
+        if (notify) showToast('Режим: Клієнтський аналітичний NLP');
       }
     } catch (e) {
-      if (notify) showToast('⚠️ Помилка перевірки статусу ШІ');
+      if (notify) showToast('Помилка перевірки статусу ШІ');
     }
   },
 
@@ -4271,7 +5514,7 @@ const AIService = {
     }
 
     outEl.classList.remove('hidden');
-    outEl.innerHTML = '<span class="text-purple-300 animate-pulse font-mono text-xs">⏳ Виконується аналіз моделі...</span>';
+    outEl.innerHTML = '<span class="text-purple-300 animate-pulse font-mono text-xs">Виконується аналіз моделі...</span>';
 
     try {
       const start = performance.now();
@@ -4306,7 +5549,7 @@ const AIService = {
         const a = analysis;
         const isThreat = a.category === 'active_threat';
         const isMvmt   = a.category === 'possible_threat';
-        const catBadge = isThreat ? '🔴 ПРЯМА ЗАГРОЗА' : (isMvmt ? '🟠 МОЖЛИВА ЗАГРОЗА' : '🔵 ОБСТАНОВКА');
+        const catBadge = isThreat ? 'ПРЯМА ЗАГРОЗА' : (isMvmt ? 'МОЖЛИВА ЗАГРОЗА' : 'ОБСТАНОВКА');
 
         outEl.innerHTML = `
           <div class="text-xs text-purple-200 pb-1 border-b border-purple-500/20 flex justify-between">
@@ -4389,8 +5632,8 @@ const AIService = {
     if (filtered.length === 0) {
       container.innerHTML = `
         <div class="text-center py-20 text-gray-400">
-          <div class="w-12 h-12 mx-auto mb-2 text-purple-400/60 flex items-center justify-center rounded-full bg-purple-500/10 border border-purple-500/20 text-xl font-bold">
-            🧠
+          <div class="w-12 h-12 mx-auto mb-2 text-purple-400/60 flex items-center justify-center rounded-full bg-purple-500/10 border border-purple-500/20">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
           </div>
           <p class="text-sm font-semibold text-gray-200">Аналітичних карток не знайдено</p>
           <p class="text-xs text-gray-400 mt-1">Змініть фільтр категорій або очистіть критерій пошуку</p>
@@ -4406,13 +5649,13 @@ const AIService = {
     const isThreat = a.category === 'active_threat';
     const isMovement = a.category === 'possible_threat';
     const borderCol = isThreat ? 'border-red-500/40 hover:border-red-500/80' : (isMovement ? 'border-amber-500/40 hover:border-amber-500/80' : 'border-purple-500/30 hover:border-purple-500/60');
-    const badgeText = isThreat ? '🔴 ПРЯМА ЗАГРОЗА' : (isMovement ? '🟠 МОЖЛИВА ЗАГРОЗА' : '🔵 ОБСТАНОВКА');
+    const badgeText = isThreat ? 'ПРЯМА ЗАГРОЗА' : (isMovement ? 'МОЖЛИВА ЗАГРОЗА' : 'ОБСТАНОВКА');
     const badgeBg = isThreat ? 'bg-red-500/20 text-red-300 border-red-500/30' : (isMovement ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-sky-500/20 text-sky-300 border-sky-500/30');
 
     // Вимога п.11: AI не має вигадувати — якщо територія не вказана, виводимо "Не вказано у джерелі"
     const territories = (a.territories && a.territories.length)
       ? a.territories.map(t => 
-          `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/10 text-gray-200 border border-white/15">📍 ${escapeHtml(t)}</span>`
+          `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/10 text-gray-200 border border-white/15">${escapeHtml(t)}</span>`
         ).join(' ')
       : '<span class="text-[10px] text-gray-400 font-mono italic">Територія: Не вказано у джерелі</span>';
 
@@ -4451,7 +5694,7 @@ const AIService = {
             <span class="text-[9px] text-gray-500 hidden sm:inline">ШІ не замінює дані NEPTUN</span>
             ${firstTerritory ? `
               <button class="px-2 py-1 rounded bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/40 text-[10px] font-mono font-semibold transition-colors" onclick="NavigationController.switchTab('map'); MapService.flyToRegion('${escapeHtml(firstTerritory)}');">
-                🗺️ На карті
+                На карті
               </button>` : ''}
           </div>
         </div>
@@ -4593,6 +5836,7 @@ function showToast(message, isUrgent = false) {
 document.addEventListener('DOMContentLoaded', async () => {
   NotificationDispatcher.init();
   SoundService.init();
+  PersonalDangerService.init();
   FollowManager.init();
   NavigationController.init();
   AlertsService.init();
@@ -4601,5 +5845,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   await TerritoriesManager.load();
   await MapService.init();
   UIController.init();
-  console.log('🚀 [РАДАР] Realtime WebSocket (wss://neptun.in.ua/api/v1/stream) + Telegram + LLM модуль активовано!');
+  console.log('[РАДАР] Realtime WebSocket (wss://neptun.in.ua/api/v1/stream) + Telegram + LLM модуль активовано!');
 });
