@@ -3,6 +3,7 @@ import { resolve } from 'path';
 
 export default defineConfig({
   root: 'public',
+  envDir: resolve(__dirname),
   base: '/radar_Ukraine/',
   build: {
     outDir: resolve(__dirname, 'dist'),

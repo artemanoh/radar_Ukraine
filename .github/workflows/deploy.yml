@@ -38,6 +38,10 @@ jobs:
 
       - name: Build production bundle
         run: npm run build
+        env:
+          CARTO_API_KEY: ${{ secrets.CARTO_API_KEY || vars.CARTO_API_KEY }}
+          MAP_API_KEY: ${{ secrets.MAP_API_KEY || vars.MAP_API_KEY }}
+          VITE_CARTO_API_KEY: ${{ secrets.CARTO_API_KEY || vars.CARTO_API_KEY }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

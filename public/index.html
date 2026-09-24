@@ -121,13 +121,33 @@
           <span id="personal-danger-text" class="hidden xs:inline">Безпечно</span>
         </div>
 
-        <!-- 14.11. Пошук території (адаптивний, не вилазить за межі) -->
-        <div class="relative flex-1 min-w-0 max-w-[130px] xs:max-w-[170px] sm:max-w-xs md:w-72" id="search-container">
-          <input id="input-search-location" type="text" placeholder="Пошук (/)..." aria-label="Пошук території" autocomplete="off" class="w-full bg-black/50 border border-white/15 text-[11px] sm:text-xs text-gray-100 rounded-lg pl-2.5 pr-6 py-1 sm:py-1.5 outline-none focus:border-sky-400 transition-colors placeholder-gray-400 font-sans truncate">
-          <button id="btn-clear-search" class="absolute right-1.5 top-1 text-gray-400 hover:text-white hidden p-1" aria-label="Очистити пошук">
-            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-          <div id="search-results-dropdown" class="absolute top-9 left-0 right-0 max-h-72 overflow-y-auto liquid-glass rounded-xl p-1 shadow-2xl z-50 hidden border border-white/20"></div>
+        <!-- Динамічні лічильники активних цілей (Дрони та Ракети) -->
+        <div id="active-targets-counters" class="flex items-center gap-1 sm:gap-2 flex-shrink-0" aria-label="Активні повітряні цілі">
+          <!-- Лічильник Дронів -->
+          <div id="counter-drones-pill" class="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-lg bg-black/40 border border-amber-500/30 text-amber-300 shadow-sm transition-all" title="Активні ударні та розвідувальні БпЛА">
+            <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 flex-shrink-0" viewBox="0 0 48 48" fill="none">
+              <polygon points="24,4 44,40 24,32 4,40" fill="#1e293b" stroke="#f59e0b" stroke-width="2.5" stroke-linejoin="round"/>
+              <line x1="4" y1="40" x2="4" y2="30" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="44" y1="40" x2="44" y2="30" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="24" y1="8" x2="24" y2="30" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="24" cy="22" r="3" fill="#f59e0b"/>
+            </svg>
+            <span class="text-[10px] sm:text-xs font-semibold tracking-wide text-gray-200">Дрони:</span>
+            <span id="target-counter-drones" class="font-mono font-bold text-xs sm:text-sm text-amber-400">0</span>
+          </div>
+
+          <!-- Лічильник Ракет -->
+          <div id="counter-missiles-pill" class="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-lg bg-black/40 border border-red-500/30 text-red-300 shadow-sm transition-all" title="Активні крилаті та балістичні ракети">
+            <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-400 flex-shrink-0" viewBox="0 0 48 48" fill="none">
+              <path d="M24,2 L28,14 L28,38 L32,44 L28,42 L24,46 L20,42 L16,44 L20,38 L20,14 Z" fill="#1e293b" stroke="#ef4444" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M20,20 L6,25 L6,28 L20,24" fill="#ef4444" opacity="0.9"/>
+              <path d="M28,20 L42,25 L42,28 L28,24" fill="#ef4444" opacity="0.9"/>
+              <circle cx="24" cy="8" r="2" fill="#ffffff"/>
+              <circle cx="24" cy="30" r="2.5" fill="#ef4444"/>
+            </svg>
+            <span class="text-[10px] sm:text-xs font-semibold tracking-wide text-gray-200">Ракети:</span>
+            <span id="target-counter-missiles" class="font-mono font-bold text-xs sm:text-sm text-red-400">0</span>
+          </div>
         </div>
 
         <!-- Годинник у реальному часі -->
@@ -879,7 +899,7 @@
             <span class="text-[10px] font-mono text-sky-400">Realtime-події</span>
           </div>
 
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <div>
               <p class="font-semibold text-gray-200 flex items-center gap-1.5">
                 <svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -887,10 +907,13 @@
               </p>
               <p class="text-[11px] text-gray-400">Дозволити системні спливаючі повідомлення у браузері</p>
             </div>
-            <input id="setting-notifications-enabled" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch">
+              <input id="setting-notifications-enabled" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <div>
               <p class="font-semibold text-gray-200 flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full bg-red-500"></span>
@@ -898,10 +921,13 @@
               </p>
               <p class="text-[11px] text-gray-400">Сповіщати при зміні офіційного статусу NEPTUN alerts</p>
             </div>
-            <input id="setting-official-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch danger">
+              <input id="setting-official-alerts-enabled" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <div>
               <p class="font-semibold text-gray-200 flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full bg-amber-500"></span>
@@ -909,10 +935,13 @@
               </p>
               <p class="text-[11px] text-gray-400">Сповіщати про появу нових підтверджених цілей (БпЛА, ракети)</p>
             </div>
-            <input id="setting-threats-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-amber-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch warning">
+              <input id="setting-threats-alerts-enabled" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <div>
               <p class="font-semibold text-gray-200 flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full bg-rose-500"></span>
@@ -920,10 +949,13 @@
               </p>
               <p class="text-[11px] text-gray-400">Фіксація пусків стратегічної авіації, балістики та Калібрів</p>
             </div>
-            <input id="setting-launches-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-red-600 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch danger">
+              <input id="setting-launches-alerts-enabled" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <div>
               <p class="font-semibold text-gray-200 flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full bg-sky-500"></span>
@@ -931,10 +963,13 @@
               </p>
               <p class="text-[11px] text-gray-400">Моніторинг оперативних зведень щодо обраних територій</p>
             </div>
-            <input id="setting-info-messages-enabled" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch">
+              <input id="setting-info-messages-enabled" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+          <div class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <div>
               <p class="font-semibold text-gray-200 flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
@@ -942,10 +977,13 @@
               </p>
               <p class="text-[11px] text-gray-400">Сповіщення про результати оперативного аналізу тексту</p>
             </div>
-            <input id="setting-ai-notifications" type="checkbox" class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch intel">
+              <input id="setting-ai-notifications" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2.5 rounded-lg bg-red-950/20 border border-red-500/30 cursor-pointer hover:bg-red-950/30 transition-colors">
+          <div class="flex items-center justify-between p-2.5 rounded-lg bg-red-950/20 border border-red-500/30 hover:bg-red-950/30 transition-colors">
             <div>
               <p class="font-semibold text-red-200 flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -953,8 +991,11 @@
               </p>
               <p class="text-[11px] text-gray-400">Підвищений звуковий та візуальний пріоритет для критичних подій</p>
             </div>
-            <input id="setting-urgent-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch danger">
+              <input id="setting-urgent-alerts-enabled" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
         </div>
 
         <!-- Секція: Звукові сигнали RADAR (Єдина логіка звуку) -->
@@ -964,14 +1005,17 @@
               <svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
               <h4 class="text-xs font-bold uppercase tracking-wider text-sky-300">Звукові сигнали RADAR</h4>
             </div>
-            <label class="flex items-center gap-2 cursor-pointer">
+            <div class="flex items-center gap-2">
               <span class="text-xs font-mono font-bold text-sky-400" id="sound-toggle-label">Увімкнено</span>
-              <input id="setting-sound-enabled" type="checkbox" checked class="w-5 h-5 accent-sky-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch">
+                <input id="setting-sound-enabled" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
           </div>
 
           <div id="sound-settings-suboptions" class="space-y-2 pt-1 transition-all">
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 hover:bg-black/60 transition-colors">
               <div>
                 <p class="font-semibold text-red-200 flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-red-500"></span>
@@ -979,10 +1023,13 @@
                 </p>
                 <p class="text-[10px] text-gray-400">Сирена при оголошенні тривоги в обраній території</p>
               </div>
-              <input id="setting-sound-alert-enabled" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch danger">
+                <input id="setting-sound-alert-enabled" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
 
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 hover:bg-black/60 transition-colors">
               <div>
                 <p class="font-semibold text-emerald-200 flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
@@ -990,10 +1037,13 @@
                 </p>
                 <p class="text-[10px] text-gray-400">Сигнал при офіційному відбої тривоги</p>
               </div>
-              <input id="setting-sound-clear-enabled" type="checkbox" checked class="w-4 h-4 accent-emerald-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch success">
+                <input id="setting-sound-clear-enabled" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
 
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 hover:bg-black/60 transition-colors">
               <div>
                 <p class="font-semibold text-amber-200 flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-amber-500"></span>
@@ -1001,16 +1051,22 @@
                 </p>
                 <p class="text-[10px] text-gray-400">Окремий сигнал при входженні реальної цілі в радіус (HIGH)</p>
               </div>
-              <input id="setting-sound-target-danger-enabled" type="checkbox" checked class="w-4 h-4 accent-amber-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch warning">
+                <input id="setting-sound-target-danger-enabled" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
 
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 hover:bg-black/60 transition-colors">
               <div>
                 <p class="font-semibold text-gray-200">Тихий час (23:00 - 07:00)</p>
                 <p class="text-[10px] text-gray-400">Приглушувати звукові сигнали в нічний час</p>
               </div>
-              <input id="setting-quiet-hours" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch">
+                <input id="setting-quiet-hours" type="checkbox">
+                <span class="slider"></span>
+              </label>
+            </div>
 
             <!-- Кнопки для тестування звуків -->
             <div class="pt-2 border-t border-white/10 flex flex-wrap gap-2">
@@ -1079,17 +1135,18 @@
               </select>
             </div>
 
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-white/5 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 hover:bg-white/5 transition-colors">
               <div>
                 <p class="font-semibold text-gray-200">Включати загальні повідомлення області</p>
                 <p class="text-[11px] text-gray-400">Показувати тривоги та загрози для всієї області разом із районом</p>
               </div>
-              <input id="setting-show-oblast-wide" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch">
+                <input id="setting-show-oblast-wide" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
           </div>
         </div>
-
-
 
         <!-- Секція: Персональна небезпека (Геолокація) — Вимога Розділу 11 -->
         <div class="space-y-2.5 p-3 rounded-xl bg-sky-950/20 border border-sky-500/30">
@@ -1101,13 +1158,16 @@
             <span class="text-[10px] font-mono text-sky-400">Локально</span>
           </div>
 
-          <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-white/5 transition-colors">
+          <div class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 hover:bg-white/5 transition-colors">
             <div>
               <p class="font-semibold text-gray-200">Використовувати геолокацію</p>
               <p class="text-[11px] text-gray-400">Локальний розрахунок відстані до цілей (без передачі координат назовні)</p>
             </div>
-            <input id="setting-geo-enabled" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch">
+              <input id="setting-geo-enabled" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
 
           <div id="personal-danger-suboptions" class="space-y-2 pt-1 opacity-50 pointer-events-none transition-all">
             <div class="p-2 rounded-lg bg-black/30 border border-white/5 space-y-1.5">
@@ -1126,29 +1186,38 @@
               <p id="personal-danger-status-hint" class="text-[10px] text-sky-300 font-mono mt-0.5">Високий рівень: ціль у радіусі 10 км</p>
             </div>
 
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/5 hover:bg-white/5 transition-colors">
               <div>
                 <p class="font-semibold text-gray-200">Сповіщати про входження цілі в радіус</p>
                 <p class="text-[11px] text-gray-400">Створювати подію лише при переході стану (NORMAL → HIGH)</p>
               </div>
-              <input id="setting-personal-notif" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch">
+                <input id="setting-personal-notif" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
 
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/5 hover:bg-white/5 transition-colors">
               <div>
                 <p class="font-semibold text-red-200">Терміновий пріоритет (URGENT)</p>
                 <p class="text-[11px] text-gray-400">Підвищений тактичний пріоритет сповіщення</p>
               </div>
-              <input id="setting-personal-urgent" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch danger">
+                <input id="setting-personal-urgent" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
 
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/30 border border-white/5 hover:bg-white/5 transition-colors">
               <div>
                 <p class="font-semibold text-gray-200">Звуковий сигнал тривоги</p>
                 <p class="text-[11px] text-gray-400">Відтворювати звуковий сигнал високої небезпеки</p>
               </div>
-              <input id="setting-personal-sound" type="checkbox" checked class="w-4 h-4 accent-amber-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch warning">
+                <input id="setting-personal-sound" type="checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
           </div>
 
           <div class="p-2 rounded bg-black/40 border border-sky-500/20 text-[10px] text-gray-400 leading-tight">
@@ -1166,10 +1235,13 @@
               </h4>
               <p class="text-[10px] text-gray-400 mt-0.5" id="ai-status-subtext">Вимкнено за замовчуванням</p>
             </div>
-            <label class="flex items-center gap-2 cursor-pointer">
+            <div class="flex items-center gap-2">
               <span class="text-xs font-mono font-bold" id="ai-toggle-label">Вимкнено</span>
-              <input id="setting-ai-master-enabled" type="checkbox" class="w-5 h-5 accent-purple-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch intel">
+                <input id="setting-ai-master-enabled" type="checkbox">
+                <span class="slider"></span>
+              </label>
+            </div>
           </div>
 
           <div class="p-2 rounded bg-purple-900/20 border border-purple-500/20 text-[10px] text-purple-200/90 leading-relaxed">
@@ -1177,15 +1249,13 @@
           </div>
 
           <div id="ai-settings-suboptions" class="space-y-2 pt-1 opacity-50 pointer-events-none transition-all">
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 hover:bg-black/60 transition-colors">
               <span class="text-xs text-gray-200">Аналіз інформаційних повідомлень</span>
-              <input id="setting-ai-analyze-messages" type="checkbox" class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
-            </label>
-
-            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
-              <span class="text-xs text-gray-200">AI-сповіщення</span>
-              <input id="setting-ai-notifications" type="checkbox" class="w-4 h-4 accent-purple-500 rounded cursor-pointer">
-            </label>
+              <label class="tactical-switch intel">
+                <input id="setting-ai-analyze-messages" type="checkbox">
+                <span class="slider"></span>
+              </label>
+            </div>
 
             <div class="p-2 rounded-lg bg-black/40 border border-white/10 space-y-1">
               <label for="setting-ai-regions" class="text-xs text-gray-300 block">Регіони для аналізу:</label>
@@ -1224,20 +1294,29 @@
             <input id="setting-zone-opacity" type="range" min="0.1" max="0.8" step="0.05" value="0.3" class="glass-range cursor-pointer">
           </div>
 
-          <label class="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer">
+          <div class="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <span class="text-gray-300">Шар тривог (полігони районів)</span>
-            <input id="setting-layer-alerts" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch danger">
+              <input id="setting-layer-alerts" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer">
+          <div class="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <span class="text-gray-300">Шар активних цілей (БпЛА / ракети)</span>
-            <input id="setting-layer-threats" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch warning">
+              <input id="setting-layer-threats" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
 
-          <label class="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer">
+          <div class="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
             <span class="text-gray-300">Анімація пульсацій та радарів</span>
-            <input id="setting-enable-animations" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
-          </label>
+            <label class="tactical-switch">
+              <input id="setting-enable-animations" type="checkbox" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
 
           <!-- Поле для введення API Key картографічного сервісу CARTO -->
           <div class="p-2.5 rounded-lg bg-black/40 border border-white/10 space-y-1.5">

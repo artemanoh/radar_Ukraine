@@ -35,11 +35,23 @@ export const RadarMap: React.FC<RadarMapProps> = ({ targets, threatZones, onTarg
   useEffect(() => {
     if (!mapContainer.current || mapInstance.current) return;
 
+    const apiKey = (import.meta.env.VITE_CARTO_API_KEY || import.meta.env.VITE_MAP_API_KEY || '').trim();
+    const styleUrl = apiKey
+      ? `https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json?key=${encodeURIComponent(apiKey)}`
+      : 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      style: styleUrl,
       center: [28.46, 49.23],
       zoom: 9,
+      transformRequest: (url: string) => {
+        if (apiKey && url.includes('basemaps.cartocdn.com') && !url.includes('key=')) {
+          const separator = url.includes('?') ? '&' : '?';
+          return { url: `${url}${separator}key=${encodeURIComponent(apiKey)}` };
+        }
+        return { url };
+      }
     });
 
     const overlay = new MapboxOverlay({ interleaved: true, layers: [] });

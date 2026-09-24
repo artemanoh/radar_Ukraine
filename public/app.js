@@ -546,6 +546,127 @@ const NotificationDispatcher = {
 };
 
 /* ============================================================
+   КЛАСИФІКАТОР ТА ДИНАМІЧНИЙ ЛІЧИЛЬНИК АКТИВНИХ ЦІЛЕЙ (NEPTUN API)
+============================================================ */
+const AirTargetClassifier = {
+  /**
+   * Класифікує повітряну ціль строго за типом з NEPTUN API.
+   * Дрони: Shahed/ударні БПЛА, розвідувальні БПЛА, UAV/БПЛА.
+   * Ракети: крилаті, балістичні, керовані, аеробалістичні.
+   * Невідомі або інші типи: повертає null (не зараховує ні до дронів, ні до ракет).
+   * @param {Object} target
+   * @returns {'drone' | 'missile' | null}
+   */
+  classify(target) {
+    if (!target) return null;
+
+    // Перевірка активного стану: неактивні/завершені цілі не враховуються
+    const status = String(target.status || 'active').toLowerCase().trim();
+    if (status !== 'active' && status !== 'tracked' && status !== 'detected') {
+      return null;
+    }
+
+    const raw = String(target.rawType || target.type || target.threatType || target.category || '').toLowerCase().trim();
+    if (!raw || raw === 'unknown' || raw === 'null' || raw === 'undefined' || raw === 'other') {
+      return null;
+    }
+
+    // 1. Дрони (Shahed / ударні БПЛА, розвідувальні БПЛА, UAV)
+    const isDrone = (
+      raw === 'drone' ||
+      raw === 'shahed' ||
+      raw === 'uav' ||
+      raw === 'fpv' ||
+      raw === 'recon' ||
+      raw === 'strike_uav' ||
+      raw === 'recon_uav' ||
+      raw.includes('shahed') ||
+      raw.includes('uav') ||
+      raw.includes('дрон') ||
+      raw.includes('бпла') ||
+      raw.includes('шахед') ||
+      raw.includes('геран') ||
+      raw.includes('geran') ||
+      raw.includes('орлан') ||
+      raw.includes('orlan') ||
+      raw.includes('zala') ||
+      raw.includes('supercam') ||
+      raw.includes('ланцет') ||
+      raw.includes('lancet')
+    );
+    if (isDrone) return 'drone';
+
+    // 2. Ракети (крилаті ракети, балістичні ракети, missile)
+    const isMissile = (
+      raw === 'missile' ||
+      raw === 'cruise' ||
+      raw === 'cruise_missile' ||
+      raw === 'ballistic' ||
+      raw === 'ballistic_missile' ||
+      raw === 'guided' ||
+      raw === 'guided_missile' ||
+      raw === 'aeroballistic' ||
+      raw.includes('missile') ||
+      raw.includes('ракета') ||
+      raw.includes('крилат') ||
+      raw.includes('балістик') ||
+      raw.includes('кинджал') ||
+      raw.includes('kinzhal') ||
+      raw.includes('іскандер') ||
+      raw.includes('iskander') ||
+      raw.includes('калібр') ||
+      raw.includes('kalibr') ||
+      raw.includes('calibr') ||
+      raw.includes('х101') ||
+      raw.includes('х-101') ||
+      raw.includes('kh101') ||
+      raw.includes('kh-101') ||
+      raw.includes('kh59') ||
+      raw.includes('kh69') ||
+      raw.includes('kh22') ||
+      raw.includes('onyx') ||
+      raw.includes('oniks') ||
+      raw.includes('циркон') ||
+      raw.includes('zircon')
+    );
+    if (isMissile) return 'missile';
+
+    return null;
+  },
+
+  /**
+   * Підраховує унікальні активні дрони та ракети.
+   * Кожна ціль рахується тільки один раз за стабільним id.
+   * @param {Map|Array|Iterable} threats
+   * @returns {{ drones: number, missiles: number }}
+   */
+  countActiveTargets(threats) {
+    let drones = 0;
+    let missiles = 0;
+    const seenIds = new Set();
+
+    if (!threats) return { drones: 0, missiles: 0 };
+    const list = threats instanceof Map ? threats.values() : (Array.isArray(threats) ? threats : []);
+
+    for (const t of list) {
+      if (!t || !t.id) continue;
+      const idStr = String(t.id).trim();
+      if (!idStr || seenIds.has(idStr)) continue;
+      seenIds.add(idStr);
+
+      const category = this.classify(t);
+      if (category === 'drone') {
+        drones++;
+      } else if (category === 'missile') {
+        missiles++;
+      }
+    }
+
+    return { drones, missiles };
+  }
+};
+
+/* ============================================================
    4. ПАРСЕР NEPTUN API
 ============================================================ */
 const NeptunParser = {
@@ -719,15 +840,16 @@ const NeptunParser = {
         .filter(Boolean);
     }
 
-    let type = (item.type || 'drone').toLowerCase();
+    const rawType = item.rawType || item.type || item.threatType || item.category || null;
+    let type = rawType ? String(rawType).toLowerCase().trim() : 'unknown';
     if (type === 'uav' || type === 'fpv') type = 'drone';
 
     return {
-      id:          item.id,
+      id:          String(item.id),
       type:        type,
-      rawType:     item.type,
-      title:       item.title || 'БпЛА',
-      status:      (item.status || 'active').toLowerCase(),
+      rawType:     rawType || item.type || null,
+      title:       item.title || (type === 'drone' ? 'БпЛА' : (type === 'missile' || type === 'ballistic' ? 'Ракета' : 'Ціль')),
+      status:      (item.status || 'active').toLowerCase().trim(),
       region:      item.region || '',
       district:    item.district || null,
       locality:    item.locality || null,
@@ -975,6 +1097,9 @@ const ChangeDetector = {
     }
 
     State.threats = parsedThreats;
+    if (typeof UIController !== 'undefined') {
+      UIController.updateCounters();
+    }
 
     if (isInitialLoad) {
       for (const t of added) {
@@ -1168,6 +1293,7 @@ const RealtimeClient = {
             isInitialLoad = false;
             UIController.hideLoading();
           }
+          UIController.updateCounters();
         }
         break;
 
@@ -1184,10 +1310,12 @@ const RealtimeClient = {
         break;
 
       case 'remove':
-        const removeId = frame.data?.id || (typeof frame.data === 'string' ? frame.data : null);
-        if (removeId) {
+        const rawRemoveId = frame.data?.id != null ? frame.data.id : (typeof frame.data === 'string' ? frame.data : null);
+        if (rawRemoveId != null) {
+          const removeId = String(rawRemoveId);
           State.threats.delete(removeId);
           MapService.removeThreat(removeId);
+          previousThreatSnapshot.delete(removeId);
           UIController.updateCounters();
           PersonalDangerService?.evaluate();
         }
@@ -3169,14 +3297,22 @@ const MapService = {
     }
 
     marker.bindPopup(`
-      <div class="custom-radar-popup p-1 font-mono text-[11px]">
-        <div class="pb-1 mb-1 border-b border-amber-500/30 text-amber-400 font-bold uppercase">
-          ${threat.areaOnly ? 'ОБЛАСНА ЗАГРОЗА' : 'АКТИВНА ЦІЛЬ'} (${threat.title || threat.type})
+      <div class="custom-radar-popup p-0.5 font-mono text-[11px] space-y-1.5">
+        <div class="flex items-center justify-between pb-1.5 border-b border-white/10">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full ${threat.areaOnly ? 'bg-amber-400' : 'bg-red-500'} animate-pulse flex-shrink-0"></span>
+            <span class="font-bold text-xs uppercase tracking-wider ${threat.areaOnly ? 'text-amber-300' : 'text-red-400'}">
+              ${threat.areaOnly ? 'ОБЛАСНА ЗАГРОЗА' : 'АКТИВНА ЦІЛЬ'}
+            </span>
+          </div>
+          <span class="text-[9px] px-1.5 py-0.5 rounded bg-white/10 text-gray-200 border border-white/10 font-bold">${escapeHtml(threat.title || threat.type)}</span>
         </div>
-        <div><span class="text-gray-400">ID:</span> <b>${threat.id}</b></div>
-        <div><span class="text-gray-400">Регіон:</span> ${threat.region}${threat.district ? ` (${threat.district})` : ''}</div>
-        ${details.join('')}
-        <div><span class="text-gray-400">Час засічки:</span> ${threat.time || 'Н/Д'}</div>
+        <div class="space-y-1 text-[11px] text-gray-300">
+          <div class="flex justify-between"><span class="text-gray-400">ID:</span> <b class="text-white">${escapeHtml(threat.id)}</b></div>
+          <div class="flex justify-between"><span class="text-gray-400">Регіон:</span> <span class="text-gray-200 truncate max-w-[180px]">${escapeHtml(threat.region)}${threat.district ? ` (${escapeHtml(threat.district)})` : ''}</span></div>
+          ${details.join('')}
+          <div class="flex justify-between pt-1 border-t border-white/5"><span class="text-gray-400">Час засічки:</span> <b class="text-amber-300">${threat.time || 'Н/Д'}</b></div>
+        </div>
       </div>`, {
         className: 'custom-radar-popup',
         autoPanPaddingTopLeft: [15, 80],
@@ -4424,8 +4560,10 @@ const AlertsService = {
 
       const targetPlace = escapeHtml(alert.name);
 
+      const severityClass = isHistory ? 'severity-green' : (isYellow ? 'severity-yellow' : 'severity-red');
+
       return `
-        <article class="p-3 sm:p-4 rounded-xl border ${borderColor} bg-black/40 hover:bg-black/60 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+        <article class="tactical-alert-card ${severityClass} flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div class="flex items-start gap-3 flex-1 min-w-0">
             <div class="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-base ${badgeColor} border flex-shrink-0 mt-0.5">
               ${iconSvg}
@@ -4596,19 +4734,42 @@ const UIController = {
     set('count-filter-alerts',  activeAlerts);
     set('count-filter-threats', activeThreats);
 
-    let d = 0, m = 0, b = 0;
-    for (const t of State.threats.values()) {
-      if (t.type === 'drone')          d++;
-      else if (t.type === 'missile')   m++;
-      else if (t.type === 'ballistic') b++;
+    // Динамічний підрахунок активних дронів та ракет із реальних даних NEPTUN
+    const { drones, missiles } = AirTargetClassifier.countActiveTargets(State.threats);
+    set('target-counter-drones', drones);
+    set('target-counter-missiles', missiles);
+
+    // Візуальний стан пігулок (акцент при наявності активних цілей > 0)
+    const dronesPill = document.getElementById('counter-drones-pill');
+    if (dronesPill) {
+      if (drones > 0) {
+        dronesPill.classList.add('border-amber-400/80', 'bg-amber-950/40', 'shadow-[0_0_12px_rgba(245,158,11,0.25)]');
+        dronesPill.classList.remove('border-amber-500/30', 'bg-black/40');
+      } else {
+        dronesPill.classList.remove('border-amber-400/80', 'bg-amber-950/40', 'shadow-[0_0_12px_rgba(245,158,11,0.25)]');
+        dronesPill.classList.add('border-amber-500/30', 'bg-black/40');
+      }
     }
-    set('count-sub-drone',      d);
-    set('count-sub-missile',    m);
-    set('count-sub-ballistic',  b);
+
+    const missilesPill = document.getElementById('counter-missiles-pill');
+    if (missilesPill) {
+      if (missiles > 0) {
+        missilesPill.classList.add('border-red-400/80', 'bg-red-950/40', 'shadow-[0_0_12px_rgba(239,68,68,0.25)]');
+        missilesPill.classList.remove('border-red-500/30', 'bg-black/40');
+      } else {
+        missilesPill.classList.remove('border-red-400/80', 'bg-red-950/40', 'shadow-[0_0_12px_rgba(239,68,68,0.25)]');
+        missilesPill.classList.add('border-red-500/30', 'bg-black/40');
+      }
+    }
+
+    set('count-sub-drone',      drones);
+    set('count-sub-missile',    missiles);
+    set('count-sub-ballistic',  0);
   },
 
   bindSearch() {
     const input    = document.getElementById('input-search-location');
+    if (!input) return;
     const btnClear = document.getElementById('btn-clear-search');
     const dropdown = document.getElementById('search-results-dropdown');
 
@@ -4923,7 +5084,11 @@ const UIController = {
         MapService.clearDistrictSelection();
         document.body.classList.remove('fullscreen-radar');
       }
-      else if (e.key === '/') { e.preventDefault(); document.getElementById('input-search-location')?.focus(); }
+      else if (e.key === '/') {
+        e.preventDefault();
+        const activeSearch = document.querySelector('#alerts-input-search, #tg-input-search, #ai-input-search, #input-tree-filter');
+        activeSearch?.focus();
+      }
       else if (e.key === '1') this.setFilter('all');
       else if (e.key === '2') this.setFilter('alerts');
       else if (e.key === '3') this.setFilter('threats');

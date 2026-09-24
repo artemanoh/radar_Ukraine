@@ -594,7 +594,13 @@ app.get('/api/v1/alerts-in-ua', async (req, res) => {
 ============================================================ */
 app.get('/api/v1/map-config', (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  const cartoKey = (process.env.CARTO_API_KEY || process.env.MAP_API_KEY || '').trim();
+  const cartoKey = (
+    process.env.CARTO_API_KEY ||
+    process.env.MAP_API_KEY ||
+    process.env.VITE_CARTO_API_KEY ||
+    process.env.VITE_MAP_API_KEY ||
+    ''
+  ).trim();
   res.json({
     status: 'ok',
     provider: 'carto',
@@ -607,7 +613,13 @@ app.get('/api/v1/map-config', (req, res) => {
 app.get('/api/v1/map-tiles/:layer/:z/:x/:y.png', (req, res) => {
   const { layer, z, x, y } = req.params;
   const sanitizedLayer = layer === 'dark_only_labels' ? 'dark_only_labels' : 'dark_nolabels';
-  const cartoKey = (process.env.CARTO_API_KEY || process.env.MAP_API_KEY || '').trim();
+  const cartoKey = (
+    process.env.CARTO_API_KEY ||
+    process.env.MAP_API_KEY ||
+    process.env.VITE_CARTO_API_KEY ||
+    process.env.VITE_MAP_API_KEY ||
+    ''
+  ).trim();
   const subdomains = ['a', 'b', 'c', 'd'];
   const s = subdomains[Math.floor(Math.random() * subdomains.length)];
   const keyParam = cartoKey ? `?key=${encodeURIComponent(cartoKey)}` : '';
