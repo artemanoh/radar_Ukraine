@@ -1516,7 +1516,7 @@ const TelegramFeedService = {
       const checkSettings = document.getElementById('setting-show-oblast-wide');
       if (checkSettings) checkSettings.checked = State.showEntireRegionWithDistrict;
 
-      this.render();
+      GlobalTerritoryFilter.onTerritoryChanged();
     });
 
     document.getElementById('tg-btn-reset-region')?.addEventListener('click', () => {
@@ -1531,9 +1531,7 @@ const TelegramFeedService = {
       const selSettings = document.getElementById('setting-selected-region');
       if (selSettings) selSettings.value = 'all';
 
-      this.syncDistrictDropdown();
-      this.render();
-      AIService?.render();
+      GlobalTerritoryFilter.onTerritoryChanged();
       showToast('Фільтр території скинуто: Вся Україна');
     });
   },
