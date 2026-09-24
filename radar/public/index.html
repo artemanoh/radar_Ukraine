@@ -875,9 +875,20 @@
         <!-- Секція 1: Сповіщення -->
         <div class="space-y-2">
           <div class="flex items-center justify-between pb-1 border-b border-white/10">
-            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">СПОДІВАННЯ ТА ЗВУК</span>
+            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">СПОДІВАННЯ</span>
             <span class="text-[10px] font-mono text-sky-400">Realtime-події</span>
           </div>
+
+          <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+            <div>
+              <p class="font-semibold text-gray-200 flex items-center gap-1.5">
+                <svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span>Браузерні сповіщення (Push)</span>
+              </p>
+              <p class="text-[11px] text-gray-400">Дозволити системні спливаючі повідомлення у браузері</p>
+            </div>
+            <input id="setting-notifications-enabled" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
+          </label>
 
           <label class="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <div>
@@ -944,6 +955,76 @@
             </div>
             <input id="setting-urgent-alerts-enabled" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
           </label>
+        </div>
+
+        <!-- Секція: Звукові сигнали RADAR (Єдина логіка звуку) -->
+        <div class="space-y-2.5 p-3 rounded-xl bg-sky-950/20 border border-sky-500/30">
+          <div class="flex items-center justify-between pb-1.5 border-b border-sky-500/20">
+            <div class="flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+              <h4 class="text-xs font-bold uppercase tracking-wider text-sky-300">Звукові сигнали RADAR</h4>
+            </div>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="text-xs font-mono font-bold text-sky-400" id="sound-toggle-label">Увімкнено</span>
+              <input id="setting-sound-enabled" type="checkbox" checked class="w-5 h-5 accent-sky-500 rounded cursor-pointer">
+            </label>
+          </div>
+
+          <div id="sound-settings-suboptions" class="space-y-2 pt-1 transition-all">
+            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+              <div>
+                <p class="font-semibold text-red-200 flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                  <span>Сигнал повітряної тривоги</span>
+                </p>
+                <p class="text-[10px] text-gray-400">Сирена при оголошенні тривоги в обраній території</p>
+              </div>
+              <input id="setting-sound-alert-enabled" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded cursor-pointer">
+            </label>
+
+            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+              <div>
+                <p class="font-semibold text-emerald-200 flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  <span>Сигнал відбою</span>
+                </p>
+                <p class="text-[10px] text-gray-400">Сигнал при офіційному відбої тривоги</p>
+              </div>
+              <input id="setting-sound-clear-enabled" type="checkbox" checked class="w-4 h-4 accent-emerald-500 rounded cursor-pointer">
+            </label>
+
+            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+              <div>
+                <p class="font-semibold text-amber-200 flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                  <span>Сигнал небезпеки цілі в радіусі</span>
+                </p>
+                <p class="text-[10px] text-gray-400">Окремий сигнал при входженні реальної цілі в радіус (HIGH)</p>
+              </div>
+              <input id="setting-sound-target-danger-enabled" type="checkbox" checked class="w-4 h-4 accent-amber-500 rounded cursor-pointer">
+            </label>
+
+            <label class="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors">
+              <div>
+                <p class="font-semibold text-gray-200">Тихий час (23:00 - 07:00)</p>
+                <p class="text-[10px] text-gray-400">Приглушувати звукові сигнали в нічний час</p>
+              </div>
+              <input id="setting-quiet-hours" type="checkbox" class="w-4 h-4 accent-sky-500 rounded cursor-pointer">
+            </label>
+
+            <!-- Кнопки для тестування звуків -->
+            <div class="pt-2 border-t border-white/10 flex flex-wrap gap-2">
+              <button type="button" id="btn-test-alert" class="px-2 py-1 text-[11px] rounded bg-red-900/40 hover:bg-red-900/60 border border-red-500/40 text-red-200 font-mono transition-colors">
+                ▶ Тест тривоги
+              </button>
+              <button type="button" id="btn-test-clear" class="px-2 py-1 text-[11px] rounded bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-200 font-mono transition-colors">
+                ▶ Тест відбою
+              </button>
+              <button type="button" id="btn-test-urgent" class="px-2 py-1 text-[11px] rounded bg-amber-900/40 hover:bg-amber-900/60 border border-amber-500/40 text-amber-200 font-mono transition-colors">
+                ▶ Тест небезпеки (HIGH)
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Секція: Фільтрація сповіщень за районами та областями -->

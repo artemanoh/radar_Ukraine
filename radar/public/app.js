@@ -368,6 +368,9 @@ const previousThreatSnapshot = new Map(); // id -> { type, status }
 const seenMessageKeys        = new Set();
 
 let isInitialLoad = true;
+if (typeof window !== 'undefined') {
+  window.setInitialLoad = (val) => { isInitialLoad = !!val; };
+}
 
 const NotificationDispatcher = {
   processedEventIds: new Set(),
@@ -407,15 +410,19 @@ const NotificationDispatcher = {
     priority = NOTIFICATION_PRIORITIES.NORMAL,
     title,
     body,
+    message,
     place = '',
     eventTime = null,
     source = 'NEPTUN API',
     level = 'red',
     subtype = '',
     isClear = false,
+    isPersonalTargetHigh = false,
     raw = null
   }) {
     if (!id) return false;
+
+    const eventBody = body || message || '';
 
     // 1. Інваріант: Initial snapshot / reload НЕ створюють сповіщень
     if (isInitialLoad) {
@@ -439,31 +446,33 @@ const NotificationDispatcher = {
     if (type === NOTIFICATION_CATEGORIES.AI_ANALYSIS && (!s.aiEnabled || !s.aiNotifications)) return false;
 
     // 4. Перевірка відстежуваного регіону (якщо увімкнено список обраних територій)
-    const isFollowed = !place || FollowManager.matchesFollowed(place);
-    if (FollowManager.followedSet.size > 0 && !isFollowed) {
-      return false;
-    }
-
-    // 4.1. Глобальна перевірка відповідності вибраній території
-    //      Єдина централізована точка фільтрації для ВСІХ типів сповіщень.
-    //      URGENT не обходить цей фільтр — пріоритет події ≠ дозвіл ігнорувати налаштування.
-    if (typeof GlobalTerritoryFilter !== 'undefined') {
-      const rawObj = raw || {};
-      if (!GlobalTerritoryFilter.passes({
-        type,
-        oblastKey:    rawObj.key      || rawObj.oblast || place,
-        oblastName:   rawObj.name     || rawObj.oblast || place,
-        apiRegion:    rawObj.region   || rawObj.oblast || null,
-        apiDistrict:  rawObj.district || null,
-        apiLocality:  rawObj.locality || null,
-        areaOnly:     rawObj.areaOnly || false,
-        text:         body,
-        title,
-        source,
-        place,
-        parsedTerritory: rawObj._parsedTerritory || null
-      })) {
+    if (!isPersonalTargetHigh) {
+      const isFollowed = !place || FollowManager.matchesFollowed(place);
+      if (FollowManager.followedSet.size > 0 && !isFollowed) {
         return false;
+      }
+
+      // 4.1. Глобальна перевірка відповідності вибраній території
+      //      Єдина централізована точка фільтрації для ВСІХ типів сповіщень.
+      //      URGENT не обходить цей фільтр — пріоритет події ≠ дозвіл ігнорувати налаштування.
+      if (typeof GlobalTerritoryFilter !== 'undefined') {
+        const rawObj = raw || {};
+        if (!GlobalTerritoryFilter.passes({
+          type,
+          oblastKey:    rawObj.key      || rawObj.oblast || place,
+          oblastName:   rawObj.name     || rawObj.oblast || place,
+          apiRegion:    rawObj.region   || rawObj.oblast || null,
+          apiDistrict:  rawObj.district || null,
+          apiLocality:  rawObj.locality || null,
+          areaOnly:     rawObj.areaOnly || false,
+          text:         eventBody,
+          title,
+          source,
+          place,
+          parsedTerritory: rawObj._parsedTerritory || null
+        })) {
+          return false;
+        }
       }
     }
 
@@ -475,22 +484,39 @@ const NotificationDispatcher = {
     const isUrgent = effectivePriority === NOTIFICATION_PRIORITIES.URGENT;
 
     // 6. Звуковий супровід (без дублювання: грає 1 раз тільки відповідний звук)
+    //    Єдина логіка звукових сигналів:
+    //    - Офіційний відбій -> сигнал відбою (SoundService.playClearSound())
+    //    - Реальна ціль у небезпечному радіусі (HIGH) -> сигнал небезпеки цілі (SoundService.playUrgentSiren())
+    //    - Офіційна тривога -> сигнал повітряної тривоги (SoundService.playAlertSiren())
+    //    - Інші повідомлення -> інформаційний сигнал (SoundService.playInfoChime())
     if (s.soundEnabled && !SoundService.isQuietTime()) {
       if (isClear) {
-        SoundService.playClearSound();
-      } else if (isUrgent) {
-        SoundService.playUrgentSiren();
+        if (s.soundClearEnabled !== false) {
+          SoundService.playClearSound();
+        }
+      } else if (isPersonalTargetHigh) {
+        if (s.soundTargetDangerEnabled !== false && s.personalDangerSound !== false) {
+          SoundService.playUrgentSiren();
+        }
       } else if (type === NOTIFICATION_CATEGORIES.OFFICIAL_ALERT) {
-        SoundService.playAlertSiren();
+        if (s.soundAlertEnabled !== false && s.officialAlertsEnabled !== false) {
+          SoundService.playAlertSiren();
+        }
+      } else if (type === NOTIFICATION_CATEGORIES.LAUNCH || type === NOTIFICATION_CATEGORIES.THREAT) {
+        if (s.threatsAlertsEnabled !== false || s.launchesAlertsEnabled !== false) {
+          SoundService.playInfoChime();
+        }
       } else {
-        SoundService.playInfoChime();
+        if (s.infoMessagesEnabled !== false) {
+          SoundService.playInfoChime();
+        }
       }
     }
 
     // 7. Браузерні сповіщення (Push API)
     if (s.notificationsEnabled) {
       const pushTitle = isUrgent ? `[ТЕРМІНОВО] ${title}` : title;
-      NotificationManager.send(pushTitle, body, id, isUrgent);
+      NotificationManager.send(pushTitle, eventBody, id, isUrgent);
     }
 
     // 8. Інтерфейсний Toast
@@ -503,7 +529,7 @@ const NotificationDispatcher = {
       type,
       priority: effectivePriority,
       title,
-      message: body,
+      message: eventBody,
       territory: place,
       eventTime,
       receivedAt: new Date().toISOString(),
@@ -759,11 +785,14 @@ const ChangeDetector = {
       }
 
       previousAlertSnapshot.set(uniqueKey, {
-        level:  unit.level,
-        status: 'active',
-        since:  unit.since,
-        name:   unit.name,
-        oblast: unit.oblast
+        key:      unit.key || uniqueKey,
+        level:    unit.level,
+        status:   'active',
+        since:    unit.since,
+        name:     unit.name,
+        oblast:   unit.oblast,
+        type:     unit.type,
+        district: unit.district || (unit.type === 'raion' ? unit.name : null)
       });
     }
 
@@ -805,7 +834,13 @@ const ChangeDetector = {
           source: 'NEPTUN API',
           level: 'green',
           isClear: true,
-          raw: { key: item.key || place, name: item.name || place, oblast: item.oblast || place }
+          raw: {
+            key:      item.key || place,
+            name:     item.name || place,
+            oblast:   item.oblast || place,
+            district: item.type === 'raion' ? (item.name || place) : (item.district || null),
+            type:     item.type
+          }
         });
 
         FeedService.addEvent({
@@ -853,7 +888,13 @@ const ChangeDetector = {
           eventTime: item.since || null,
           source: 'NEPTUN API',
           level: item.level || 'red',
-          raw: { key: item.key || place, name: item.name || place, oblast: item.oblast || place }
+          raw: {
+            key:      item.key || place,
+            name:     item.name || place,
+            oblast:   item.oblast || place,
+            district: item.type === 'raion' ? (item.name || place) : (item.district || null),
+            type:     item.type
+          }
         });
 
         FeedService.addEvent({
@@ -887,7 +928,13 @@ const ChangeDetector = {
           eventTime: unit.since || null,
           source: 'NEPTUN API',
           level: unit.level,
-          raw: { key: unit.key || place, name: unit.name || place, oblast: unit.oblast || place }
+          raw: {
+            key:      unit.key || place,
+            name:     unit.name || place,
+            oblast:   unit.oblast || place,
+            district: unit.type === 'raion' ? (unit.name || place) : (unit.district || null),
+            type:     unit.type
+          }
         });
 
         FeedService.addEvent({
@@ -4866,24 +4913,29 @@ const UIController = {
   },
 
   bindSettingsModal() {
-    const modal          = document.getElementById('settings-modal');
-    const btnOpen        = document.getElementById('btn-open-settings');
-    const btnClose       = document.getElementById('btn-close-settings');
-    const btnSave        = document.getElementById('btn-save-settings');
-    const notifCheck     = document.getElementById('setting-notifications-enabled');
-    const officialCheck  = document.getElementById('setting-official-alerts-enabled');
-    const threatsCheck   = document.getElementById('setting-threats-alerts-enabled');
-    const launchesCheck  = document.getElementById('setting-launches-alerts-enabled');
-    const infoCheck      = document.getElementById('setting-info-messages-enabled');
-    const urgentCheck    = document.getElementById('setting-urgent-alerts-enabled');
-    const soundCheck     = document.getElementById('setting-sound-enabled');
-    const quietCheck     = document.getElementById('setting-quiet-hours');
-    const opRange        = document.getElementById('setting-zone-opacity');
-    const opLabel        = document.getElementById('label-zone-opacity');
-    const layerAlerts    = document.getElementById('setting-layer-alerts');
-    const layerThreats   = document.getElementById('setting-layer-threats');
-    const animCheck      = document.getElementById('setting-enable-animations');
-    const mapApiKeyInput = document.getElementById('setting-map-api-key');
+    const modal                  = document.getElementById('settings-modal');
+    const btnOpen                = document.getElementById('btn-open-settings');
+    const btnClose               = document.getElementById('btn-close-settings');
+    const btnSave                = document.getElementById('btn-save-settings');
+    const notifCheck             = document.getElementById('setting-notifications-enabled');
+    const officialCheck          = document.getElementById('setting-official-alerts-enabled');
+    const threatsCheck           = document.getElementById('setting-threats-alerts-enabled');
+    const launchesCheck          = document.getElementById('setting-launches-alerts-enabled');
+    const infoCheck              = document.getElementById('setting-info-messages-enabled');
+    const urgentCheck            = document.getElementById('setting-urgent-alerts-enabled');
+    const soundCheck             = document.getElementById('setting-sound-enabled');
+    const soundAlertCheck        = document.getElementById('setting-sound-alert-enabled');
+    const soundClearCheck        = document.getElementById('setting-sound-clear-enabled');
+    const soundTargetDangerCheck = document.getElementById('setting-sound-target-danger-enabled');
+    const quietCheck             = document.getElementById('setting-quiet-hours');
+    const soundToggleLabel       = document.getElementById('sound-toggle-label');
+    const soundSuboptions        = document.getElementById('sound-settings-suboptions');
+    const opRange                = document.getElementById('setting-zone-opacity');
+    const opLabel                = document.getElementById('label-zone-opacity');
+    const layerAlerts            = document.getElementById('setting-layer-alerts');
+    const layerThreats           = document.getElementById('setting-layer-threats');
+    const animCheck              = document.getElementById('setting-enable-animations');
+    const mapApiKeyInput         = document.getElementById('setting-map-api-key');
 
     // Фільтрація сповіщень за районами та областями
     const settingRegionSelect      = document.getElementById('setting-selected-region');
@@ -4919,6 +4971,28 @@ const UIController = {
     const personalNotifCheck  = document.getElementById('setting-personal-notif');
     const personalUrgentCheck = document.getElementById('setting-personal-urgent');
     const personalSoundCheck  = document.getElementById('setting-personal-sound');
+
+    const updateSoundSuboptionsState = (enabled) => {
+      if (soundSuboptions) {
+        soundSuboptions.classList.toggle('opacity-50', !enabled);
+        soundSuboptions.classList.toggle('pointer-events-none', !enabled);
+      }
+      if (soundToggleLabel) {
+        soundToggleLabel.textContent = enabled ? 'Увімкнено' : 'Вимкнено';
+        soundToggleLabel.className = enabled ? 'text-xs font-mono font-bold text-sky-400' : 'text-xs font-mono font-bold text-gray-400';
+      }
+    };
+
+    soundCheck?.addEventListener('change', (e) => {
+      updateSoundSuboptionsState(e.target.checked);
+    });
+
+    soundTargetDangerCheck?.addEventListener('change', (e) => {
+      if (personalSoundCheck) personalSoundCheck.checked = e.target.checked;
+    });
+    personalSoundCheck?.addEventListener('change', (e) => {
+      if (soundTargetDangerCheck) soundTargetDangerCheck.checked = e.target.checked;
+    });
 
     const updateGeoSuboptionsState = (enabled) => {
       if (geoSuboptions) {
@@ -4993,14 +5067,18 @@ const UIController = {
 
     const openModal = () => {
       const s = StorageManager.getSettings();
-      if (notifCheck)      notifCheck.checked      = s.notificationsEnabled;
-      if (officialCheck)   officialCheck.checked   = s.officialAlertsEnabled !== false;
-      if (threatsCheck)    threatsCheck.checked    = s.threatsAlertsEnabled !== false;
-      if (launchesCheck)   launchesCheck.checked   = s.launchesAlertsEnabled !== false;
-      if (infoCheck)       infoCheck.checked       = s.infoMessagesEnabled !== false;
-      if (urgentCheck)     urgentCheck.checked     = s.urgentAlertsEnabled !== false;
-      if (soundCheck)      soundCheck.checked      = s.soundEnabled !== false;
-      if (quietCheck)      quietCheck.checked      = s.quietHours || false;
+      if (notifCheck)             notifCheck.checked             = s.notificationsEnabled;
+      if (officialCheck)          officialCheck.checked          = s.officialAlertsEnabled !== false;
+      if (threatsCheck)           threatsCheck.checked           = s.threatsAlertsEnabled !== false;
+      if (launchesCheck)          launchesCheck.checked          = s.launchesAlertsEnabled !== false;
+      if (infoCheck)              infoCheck.checked              = s.infoMessagesEnabled !== false;
+      if (urgentCheck)            urgentCheck.checked            = s.urgentAlertsEnabled !== false;
+      if (soundCheck)             soundCheck.checked             = s.soundEnabled !== false;
+      if (soundAlertCheck)        soundAlertCheck.checked        = s.soundAlertEnabled !== false;
+      if (soundClearCheck)        soundClearCheck.checked        = s.soundClearEnabled !== false;
+      if (soundTargetDangerCheck) soundTargetDangerCheck.checked = (s.soundTargetDangerEnabled !== false && s.personalDangerSound !== false);
+      if (quietCheck)             quietCheck.checked             = s.quietHours || false;
+      updateSoundSuboptionsState(s.soundEnabled !== false);
       if (opRange)         opRange.value           = s.zoneOpacity || 0.35;
       if (opLabel)         opLabel.textContent     = `${Math.round((s.zoneOpacity || 0.35) * 100)}%`;
       if (layerAlerts)     layerAlerts.checked     = s.layerAlerts;
@@ -5027,7 +5105,7 @@ const UIController = {
 
       if (personalNotifCheck)  personalNotifCheck.checked  = s.personalDangerNotif !== false;
       if (personalUrgentCheck) personalUrgentCheck.checked = s.personalDangerUrgent !== false;
-      if (personalSoundCheck)  personalSoundCheck.checked  = s.personalDangerSound !== false;
+      if (personalSoundCheck)  personalSoundCheck.checked  = (s.soundTargetDangerEnabled !== false && s.personalDangerSound !== false);
 
       // Завантаження стану ШІ
       const aiOn = s.aiEnabled === true;
@@ -5080,23 +5158,23 @@ const UIController = {
     });
 
     document.getElementById('btn-test-alert')?.addEventListener('click', () => {
-      SoundService.playAlertSiren();
+      SoundService.playAlertSiren(true);
       showToast('Тест: Оголошення тривоги');
     });
 
     document.getElementById('btn-test-clear')?.addEventListener('click', () => {
-      SoundService.playClearSound();
+      SoundService.playClearSound(true);
       showToast('Тест: Відбій тривоги');
     });
 
     document.getElementById('btn-test-urgent')?.addEventListener('click', () => {
-      SoundService.playUrgentSiren();
-      showToast('Тест: Високий рівень небезпеки', true);
+      SoundService.playUrgentSiren(true);
+      showToast('Тест: Небезпека цілі (HIGH)', true);
     });
 
     const testSoundBtn = document.getElementById('btn-test-sound');
     testSoundBtn?.addEventListener('click', () => {
-      SoundService.playAlertSiren();
+      SoundService.playAlertSiren(true);
       showToast('Тест звуку: Оголошення тривоги');
     });
 
@@ -5134,32 +5212,35 @@ const UIController = {
       GlobalTerritoryFilter.onTerritoryChanged();
 
       const updated = {
-        notificationsEnabled:   notifCheck?.checked || false,
-        officialAlertsEnabled:  officialCheck?.checked !== false,
-        threatsAlertsEnabled:   threatsCheck?.checked !== false,
-        launchesAlertsEnabled:  launchesCheck?.checked !== false,
-        infoMessagesEnabled:    infoCheck?.checked !== false,
-        urgentAlertsEnabled:    urgentCheck?.checked !== false,
-        geoEnabled:             isGeoEnabled,
-        personalDangerRadiusKm: personalRad,
-        personalDangerNotif:    personalNotifCheck?.checked !== false,
-        personalDangerUrgent:   personalUrgentCheck?.checked !== false,
-        personalDangerSound:    personalSoundCheck?.checked !== false,
-        aiEnabled:              aiMasterCheck?.checked === true,
-        aiAnalyzeMessages:      aiAnalyzeCheck?.checked !== false,
-        aiNotifications:        aiNotifCheck?.checked === true,
-        aiRegions:              aiRegionsSelect?.value || 'all',
-        aiTypeThreats:          aiTypeThreats?.checked !== false,
-        aiTypeLaunches:         aiTypeLaunches?.checked !== false,
-        aiTypeInfo:             aiTypeInfo?.checked !== false,
-        aiTabVisible:           true,
-        soundEnabled:           soundCheck?.checked !== false,
-        quietHours:             quietCheck?.checked || false,
-        zoneOpacity:            parseFloat(opRange?.value || 0.35),
-        layerAlerts:            layerAlerts?.checked !== false,
-        layerThreats:           layerThreats?.checked !== false,
-        enableAnimations:       animCheck?.checked !== false,
-        cartoApiKey:            (mapApiKeyInput?.value || '').trim()
+        notificationsEnabled:     notifCheck?.checked || false,
+        officialAlertsEnabled:    officialCheck?.checked !== false,
+        threatsAlertsEnabled:     threatsCheck?.checked !== false,
+        launchesAlertsEnabled:    launchesCheck?.checked !== false,
+        infoMessagesEnabled:      infoCheck?.checked !== false,
+        urgentAlertsEnabled:      urgentCheck?.checked !== false,
+        geoEnabled:               isGeoEnabled,
+        personalDangerRadiusKm:   personalRad,
+        personalDangerNotif:      personalNotifCheck?.checked !== false,
+        personalDangerUrgent:     personalUrgentCheck?.checked !== false,
+        personalDangerSound:      soundTargetDangerCheck?.checked !== false,
+        aiEnabled:                aiMasterCheck?.checked === true,
+        aiAnalyzeMessages:        aiAnalyzeCheck?.checked !== false,
+        aiNotifications:          aiNotifCheck?.checked === true,
+        aiRegions:                aiRegionsSelect?.value || 'all',
+        aiTypeThreats:            aiTypeThreats?.checked !== false,
+        aiTypeLaunches:           aiTypeLaunches?.checked !== false,
+        aiTypeInfo:               aiTypeInfo?.checked !== false,
+        aiTabVisible:             true,
+        soundEnabled:             soundCheck?.checked !== false,
+        soundAlertEnabled:        soundAlertCheck?.checked !== false,
+        soundClearEnabled:        soundClearCheck?.checked !== false,
+        soundTargetDangerEnabled: soundTargetDangerCheck?.checked !== false,
+        quietHours:               quietCheck?.checked || false,
+        zoneOpacity:              parseFloat(opRange?.value || 0.35),
+        layerAlerts:              layerAlerts?.checked !== false,
+        layerThreats:             layerThreats?.checked !== false,
+        enableAnimations:         animCheck?.checked !== false,
+        cartoApiKey:              (mapApiKeyInput?.value || '').trim()
       };
       StorageManager.saveSettings(updated);
       MapService.updateApiKey(updated.cartoApiKey);
@@ -5222,9 +5303,30 @@ const SoundService = {
       this.chimeAudio.preload = 'auto';
       this.notificationAudio = new Audio(`${BASE_PATH}sounds/notification.mp3`);
       this.notificationAudio.preload = 'auto';
+      this.unlockOnFirstInteraction();
     } catch (e) {
       console.warn('[SoundService] Audio error:', e);
     }
+  },
+
+  unlockOnFirstInteraction() {
+    const unlock = () => {
+      this.ensureContext();
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume();
+      }
+      [this.sirenAudio, this.clearAudio, this.urgentAudio, this.chimeAudio, this.notificationAudio].forEach(a => {
+        if (a) {
+          try { a.load?.(); } catch (e) {}
+        }
+      });
+      ['pointerdown', 'touchstart', 'click', 'keydown'].forEach(evt => {
+        document.removeEventListener(evt, unlock, { capture: true });
+      });
+    };
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach(evt => {
+      document.addEventListener(evt, unlock, { capture: true, once: true });
+    });
   },
 
   ensureContext() {
@@ -5253,10 +5355,10 @@ const SoundService = {
     });
   },
 
-  playUrgentSiren() {
-    if (isInitialLoad) return;
+  playUrgentSiren(force = false) {
+    if (!force && isInitialLoad) return;
     const s = StorageManager.getSettings();
-    if (!s.soundEnabled || s.urgentAlertsEnabled === false || this.isQuietTime()) return;
+    if (!force && (!s.soundEnabled || s.soundTargetDangerEnabled === false || s.personalDangerSound === false || this.isQuietTime())) return;
 
     this.stopAll();
     if (this.urgentAudio) {
@@ -5269,10 +5371,10 @@ const SoundService = {
     }
   },
 
-  playAlertSiren() {
-    if (isInitialLoad) return;
+  playAlertSiren(force = false) {
+    if (!force && isInitialLoad) return;
     const s = StorageManager.getSettings();
-    if (!s.soundEnabled || this.isQuietTime()) return;
+    if (!force && (!s.soundEnabled || s.soundAlertEnabled === false || this.isQuietTime())) return;
 
     this.stopAll();
     if (this.sirenAudio) {
@@ -5285,10 +5387,10 @@ const SoundService = {
     }
   },
 
-  playClearSound() {
-    if (isInitialLoad) return;
+  playClearSound(force = false) {
+    if (!force && isInitialLoad) return;
     const s = StorageManager.getSettings();
-    if (!s.soundEnabled || this.isQuietTime()) return;
+    if (!force && (!s.soundEnabled || s.soundClearEnabled === false || this.isQuietTime())) return;
 
     this.stopAll();
     if (this.clearAudio) {
@@ -5301,10 +5403,10 @@ const SoundService = {
     }
   },
 
-  playInfoChime() {
-    if (isInitialLoad) return;
+  playInfoChime(force = false) {
+    if (!force && isInitialLoad) return;
     const s = StorageManager.getSettings();
-    if (!s.soundEnabled || this.isQuietTime()) return;
+    if (!force && (!s.soundEnabled || this.isQuietTime())) return;
 
     this.stopAll();
     // Спочатку намагаємося відтворити notification.mp3 (завантажений користувачем звук),
@@ -5597,18 +5699,14 @@ const PersonalDangerService = {
         NotificationDispatcher.dispatch({
           id: `personal-danger-${Date.now()}`,
           type: NOTIFICATION_CATEGORIES.THREAT,
+          priority: s.personalDangerUrgent !== false ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
           title: 'Персональна небезпека',
-          message: `Реальна ціль (${closest?.title || 'БпЛА/ракета'}) знаходиться приблизно за ${this.minDistKm.toFixed(1)} км від вашого місцезнаходження.`,
-          isUrgent: s.personalDangerUrgent !== false,
-          isPersonal: true,
-          distanceKm: this.minDistKm,
-          time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }),
+          body: `Реальна ціль (${closest?.title || 'БпЛА/ракета'}) знаходиться приблизно за ${this.minDistKm.toFixed(1)} км від вашого місцезнаходження.`,
+          isPersonalTargetHigh: true,
+          place: '',
+          eventTime: new Date().toISOString(),
           source: 'RADAR Geolocation'
         });
-
-        if (s.personalDangerSound !== false && s.soundEnabled && !SoundService.isQuietTime()) {
-          SoundService.playUrgentSiren();
-        }
       }
     } else if (currentLevel === 'NORMAL' && this.previousLevel === 'HIGH') {
       if (!isInitialLoad) {
@@ -5672,15 +5770,18 @@ const StorageManager = {
     aiRegions:              'all',
     aiTypeThreats:          true,
     aiTypeLaunches:         true,
-    aiTypeInfo:             true,
-    aiTabVisible:           true,
-    soundEnabled:           true,
-    quietHours:            false,
-    zoneOpacity:           0.35,
-    layerAlerts:           true,
-    layerThreats:          true,
-    enableAnimations:      true,
-    cartoApiKey:           ''
+    aiTypeInfo:               true,
+    aiTabVisible:             true,
+    soundEnabled:             true,
+    soundAlertEnabled:        true,
+    soundClearEnabled:        true,
+    soundTargetDangerEnabled: true,
+    quietHours:               false,
+    zoneOpacity:              0.35,
+    layerAlerts:              true,
+    layerThreats:             true,
+    enableAnimations:         true,
+    cartoApiKey:              ''
   },
 
   getSettings() {
