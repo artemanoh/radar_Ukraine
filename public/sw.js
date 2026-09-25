@@ -137,7 +137,8 @@ self.addEventListener('notificationclick', (event) => {
       }
       // Якщо жодної вкладки не відкрито — відкриваємо нове вікно
       if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
+        const fullTargetUrl = new URL(targetUrl, self.registration.scope).href;
+        return self.clients.openWindow(fullTargetUrl);
       }
     })
   );

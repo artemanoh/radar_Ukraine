@@ -5774,24 +5774,51 @@ const NotificationManager = {
       return s.pushServerUrl.trim().replace(/\/+$/, '');
     }
     if (typeof window.RADAR_CONFIG !== 'undefined' && window.RADAR_CONFIG.PUSH_API_URL) {
-      return window.RADAR_CONFIG.PUSH_API_URL.replace(/\/+$/, '');
+      return window.RADAR_CONFIG.PUSH_API_URL.trim().replace(/\/+$/, '');
     }
     if (typeof window.RADAR_PUSH_URL === 'string' && window.RADAR_PUSH_URL.trim()) {
       return window.RADAR_PUSH_URL.trim().replace(/\/+$/, '');
     }
-    // За замовчуванням: поточний origin (для Node.js бекенду або self-hosted)
-    return window.location.origin;
+    // Якщо застосунок запущено на статичному хостингу GitHub Pages і бекенд не вказано
+    if (typeof window !== 'undefined' && window.location && window.location.hostname.endsWith('github.io')) {
+      return null;
+    }
+    // За замовчуванням: поточний origin (для Node.js бекенду на VPS або localhost)
+    return (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
   },
 
   urlBase64ToUint8Array(base64String) {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    for (let i = 0; i < rawData.length; ++i) {
-      outputArray[i] = rawData.charCodeAt(i);
+    if (!base64String || typeof base64String !== 'string') {
+      throw new Error('VAPID public key має бути непорожнім рядком Base64URL');
     }
-    return outputArray;
+    // Очищення від лапок, пробілів, символів нових рядків
+    let cleaned = base64String.trim().replace(/^["']|["']$/g, '').replace(/[\r\n\s]/g, '');
+    if (!cleaned) {
+      throw new Error('VAPID public key порожній після санітизації');
+    }
+    // Заміна Base64URL символів на стандартний Base64
+    cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
+
+    // Доповнення символами padding '='
+    const mod = cleaned.length % 4;
+    if (mod === 2) {
+      cleaned += '==';
+    } else if (mod === 3) {
+      cleaned += '=';
+    } else if (mod === 1) {
+      throw new Error(`Невалідна довжина Base64 (${cleaned.length} символів) для VAPID public key`);
+    }
+
+    try {
+      const rawData = window.atob(cleaned);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    } catch (e) {
+      throw new Error(`Помилка декодування Base64 VAPID ключа: ${e.message}`);
+    }
   },
 
   checkIosStatus() {
@@ -5806,9 +5833,11 @@ const NotificationManager = {
   },
 
   async checkSubscription() {
-    if (!this.swRegistration || !('PushManager' in window)) return false;
+    if (!('PushManager' in window)) return false;
     try {
-      this.pushSubscription = await this.swRegistration.pushManager.getSubscription();
+      const reg = await navigator.serviceWorker.ready;
+      this.swRegistration = reg;
+      this.pushSubscription = await reg.pushManager.getSubscription();
       this.isPushSubscribed = Boolean(this.pushSubscription);
       this.updatePushBadge(this.isPushSubscribed);
       return this.isPushSubscribed;
@@ -5845,78 +5874,161 @@ const NotificationManager = {
   },
 
   async subscribeToPush() {
-    if (!this.swRegistration) {
-      await this.init();
+    console.log('[PUSH-DIAG] 1. Ініціалізація підписки Web Push...');
+    if (!('serviceWorker' in navigator)) {
+      console.warn('[PUSH-DIAG] ServiceWorker API відсутній у цьому браузері.');
+      return null;
     }
-    if (!this.swRegistration || !('PushManager' in window)) {
-      console.warn('[PUSH] PushManager не підтримується цим браузером.');
+    if (!('PushManager' in window)) {
+      console.warn('[PUSH-DIAG] PushManager API відсутній у цьому браузері або режимі (на iOS потрібен PWA).');
       return null;
     }
 
     try {
-      const serverUrl = this.getPushServerUrl();
-      const res = await fetch(`${serverUrl}/api/v1/push/vapid-public-key`, {
-        headers: { 'Accept': 'application/json' }
-      });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} отримання VAPID-ключа`);
+      // 1. Очікуємо готовності Service Worker
+      if (!this.swRegistration) {
+        await this.init();
       }
-      const data = await res.json();
-      const publicKey = data.publicKey;
-      if (!publicKey) {
-        throw new Error('Отримано порожній VAPID-ключ від сервера');
+      const reg = await navigator.serviceWorker.ready;
+      this.swRegistration = reg;
+      console.log('[PUSH-DIAG] 1. Service Worker готовий:', {
+        scope: reg.scope,
+        active: Boolean(reg.active),
+        hasPushManager: Boolean(reg.pushManager)
+      });
+
+      // 2. Визначення URL бекенду
+      const serverUrl = this.getPushServerUrl();
+      console.log('[PUSH-DIAG] 2. Push Server URL:', serverUrl || '(не налаштовано для GH Pages)');
+
+      if (!serverUrl) {
+        const msg = 'Push-сервер не налаштовано для статичного GitHub Pages. Вкажіть адресу вашого Push-сервера у Налаштуваннях.';
+        console.warn('[PUSH-DIAG]', msg);
+        showToast(msg, true);
+        this.updatePushBadge(false);
+        return null;
       }
 
+      // 3. Запит VAPID public key
+      const vapidEndpoint = `${serverUrl}/api/v1/push/vapid-public-key`;
+      console.log('[PUSH-DIAG] 3. Запит VAPID ключа:', vapidEndpoint);
+      let res;
+      try {
+        res = await fetch(vapidEndpoint, {
+          headers: { 'Accept': 'application/json' }
+        });
+      } catch (fetchErr) {
+        console.error('[PUSH-DIAG] 3. Помилка мережевого з’єднання з Push-сервером:', fetchErr);
+        throw new Error(`Не вдалося з'єднатися з Push-сервером за адресою ${vapidEndpoint}: ${fetchErr.message}`);
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      console.log('[PUSH-DIAG] 3. Відповідь VAPID endpoint:', {
+        status: res.status,
+        contentType,
+        ok: res.ok
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} отримання VAPID-ключа від ${vapidEndpoint}`);
+      }
+
+      if (!contentType.includes('application/json')) {
+        const textPreview = await res.text();
+        throw new Error(`Push-сервер повернув не-JSON відповідь (тип ${contentType}): "${textPreview.slice(0, 60)}"`);
+      }
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.error('[PUSH-DIAG] 3. Помилка парсингу JSON відповіді VAPID:', jsonErr);
+        throw new Error(`Помилка розбору JSON VAPID: ${jsonErr.message}`);
+      }
+
+      const publicKey = (data && data.publicKey ? String(data.publicKey) : '').trim();
+      console.log('[PUSH-DIAG] 3. VAPID ключ отримано:', {
+        hasKey: Boolean(publicKey),
+        length: publicKey.length,
+        prefix: publicKey ? publicKey.slice(0, 10) + '...' : 'none'
+      });
+
+      if (!publicKey) {
+        throw new Error('Отримано порожній VAPID public key від сервера');
+      }
+
+      // 4. Перетворення у Uint8Array
       const appServerKey = this.urlBase64ToUint8Array(publicKey);
-      let sub = await this.swRegistration.pushManager.getSubscription();
+      console.log('[PUSH-DIAG] 4. applicationServerKey згенеровано:', {
+        byteLength: appServerKey.byteLength,
+        firstByte: appServerKey[0],
+        isUint8Array: appServerKey instanceof Uint8Array
+      });
+
+      // 5. Реєстрація у PushManager
+      let sub = await reg.pushManager.getSubscription();
       if (!sub) {
-        sub = await this.swRegistration.pushManager.subscribe({
+        console.log('[PUSH-DIAG] 5. Виклик reg.pushManager.subscribe...');
+        sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: appServerKey
         });
+        console.log('[PUSH-DIAG] 5. Нову Push-підписку успішно створено!');
+      } else {
+        console.log('[PUSH-DIAG] 5. Використано існуючу підписку PushManager.');
       }
 
       this.pushSubscription = sub;
       this.isPushSubscribed = true;
       this.updatePushBadge(true);
 
-      // Синхронізуємо підписку з бекендом
+      // 6. Синхронізуємо підписку з бекендом
       await this.syncSubscriptionSettings(sub);
-      console.log('[PUSH] Успішно підписано на Web Push notifications.');
+      console.log('[PUSH-DIAG] 6. Підписку успішно синхронізовано з бекендом.');
       return sub;
     } catch (err) {
-      console.warn('[PUSH] Помилка створення Push-підписки:', err.message);
+      console.error('[PUSH-DIAG] ПОМИЛКА створення Push-підписки:', {
+        name: err.name,
+        message: err.message,
+        stack: err.stack
+      });
       this.updatePushBadge(false);
+      showToast(`Помилка Push-підписки: ${err.message}`, true);
       return null;
     }
   },
 
   async unsubscribeFromPush() {
-    if (!this.swRegistration || !('PushManager' in window)) return;
+    if (!('PushManager' in window)) return;
     try {
-      const sub = await this.swRegistration.pushManager.getSubscription();
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
       if (sub) {
         const serverUrl = this.getPushServerUrl();
-        await fetch(`${serverUrl}/api/v1/push/unsubscribe`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: sub.endpoint })
-        }).catch(() => null);
-
+        if (serverUrl) {
+          await fetch(`${serverUrl}/api/v1/push/unsubscribe`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint })
+          }).catch(() => null);
+        }
         await sub.unsubscribe();
       }
       this.pushSubscription = null;
       this.isPushSubscribed = false;
       this.updatePushBadge(false);
-      console.log('[PUSH] Підписку скасовано.');
+      console.log('[PUSH-DIAG] Підписку скасовано.');
     } catch (e) {
-      console.warn('[PUSH] Помилка відписки:', e);
+      console.warn('[PUSH-DIAG] Помилка відписки:', e);
     }
   },
 
   async syncSubscriptionSettings(existingSub = null) {
     const sub = existingSub || this.pushSubscription;
     if (!sub) return;
+
+    const serverUrl = this.getPushServerUrl();
+    if (!serverUrl) return;
 
     try {
       const s = StorageManager.getSettings();
@@ -5941,26 +6053,56 @@ const NotificationManager = {
         }
       };
 
-      const serverUrl = this.getPushServerUrl();
-      await fetch(`${serverUrl}/api/v1/push/subscribe`, {
+      const res = await fetch(`${serverUrl}/api/v1/push/subscribe`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload)
       });
-      console.log('[PUSH] Налаштування підписки синхронізовано з сервером.');
+      if (res.ok) {
+        console.log('[PUSH-DIAG] Підписку синхронізовано з бекендом.');
+      } else {
+        console.warn('[PUSH-DIAG] Сервер повернув HTTP', res.status, 'при синхронізації підписки.');
+      }
     } catch (e) {
-      console.warn('[PUSH] Помилка синхронізації підписки з бекендом:', e.message);
+      console.warn('[PUSH-DIAG] Помилка синхронізації підписки з бекендом:', e.message);
     }
   },
 
   async sendTestPush() {
+    console.log('[PUSH-DIAG] Клік Тест Push: початок тестування...');
     const serverUrl = this.getPushServerUrl();
+    console.log('[PUSH-DIAG] Push Server URL:', serverUrl || '(не налаштовано)');
+
+    if (!serverUrl) {
+      const msg = 'Для відправки Push на GitHub Pages вкажіть URL вашого Push-сервера у Налаштуваннях (або запустіть локальний сервер node index.js).';
+      console.warn('[PUSH-DIAG]', msg);
+      showToast(msg, true);
+      return false;
+    }
+
+    // Перевірка підписки перед тестом
+    if (!this.pushSubscription) {
+      console.log('[PUSH-DIAG] Підписка відсутня, запитуємо підписку перед тестом...');
+      try {
+        const sub = await this.subscribeToPush();
+        if (!sub) {
+          showToast('Не вдалося створити Push-підписку для тесту. Дозвольте сповіщення.', true);
+          return false;
+        }
+      } catch (subErr) {
+        showToast(`Помилка підписки: ${subErr.message}`, true);
+        return false;
+      }
+    }
+
     const endpoint = this.pushSubscription ? this.pushSubscription.endpoint : null;
+    const testUrl = `${serverUrl}/api/v1/push/test`;
+    console.log('[PUSH-DIAG] Відправка запиту на:', testUrl, 'endpoint:', endpoint ? endpoint.slice(0, 30) + '...' : 'none');
 
     try {
-      const res = await fetch(`${serverUrl}/api/v1/push/test`, {
+      const res = await fetch(testUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({
           endpoint,
           isUrgent: true,
@@ -5969,11 +6111,34 @@ const NotificationManager = {
         })
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Помилка відправки тестового push');
+      const contentType = res.headers.get('content-type') || '';
+      console.log('[PUSH-DIAG] Відповідь тест-ендпоінту:', {
+        status: res.status,
+        contentType,
+        ok: res.ok
+      });
+
+      let data = null;
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch (jsonErr) {
+          console.warn('[PUSH-DIAG] Помилка розбору JSON відповіді тесту:', jsonErr);
+        }
+      } else {
+        const text = await res.text();
+        throw new Error(`Сервер повернув не-JSON відповідь (HTTP ${res.status}: "${text.slice(0, 80)}")`);
+      }
+
+      if (!res.ok) {
+        throw new Error((data && data.error) ? data.error : `HTTP ${res.status}: Помилка відправки тестового push`);
+      }
+
       showToast('Тестове Push-сповіщення відправлено на сервер!');
+      console.log('[PUSH-DIAG] Тест успішно відправлено на сервер, очікуємо доставку браузером/OS.');
       return true;
     } catch (err) {
+      console.error('[PUSH-DIAG] Помилка sendTestPush:', err);
       showToast(`Помилка тесту: ${err.message}`, true);
       return false;
     }

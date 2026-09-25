@@ -67,8 +67,8 @@ class PushService {
       }
     }
 
-    this.vapidPublicKey = pub;
-    this.vapidPrivateKey = priv;
+    this.vapidPublicKey = String(pub || '').trim();
+    this.vapidPrivateKey = String(priv || '').trim();
     this.vapidSubject = subj;
 
     try {
@@ -131,9 +131,10 @@ class PushService {
     // 1. Отримати публічний VAPID-ключ для створення підписки у клієнті
     app.get('/api/v1/push/vapid-public-key', (req, res) => {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.json({
         status: 'ok',
-        publicKey: this.vapidPublicKey
+        publicKey: (this.vapidPublicKey || '').trim()
       });
     });
 
