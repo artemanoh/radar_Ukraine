@@ -52,6 +52,10 @@ app.use('/api/', apiLimiter);
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Сервіс Web Push для фонових та критичних сповіщень
+const pushService = require('./services/pushService');
+pushService.init(app);
+
 /* ============================================================
    АКТУАЛЬНИЙ СТАН NEPTUN API (СИНХРОНІЗАЦІЯ З UPSTREAM)
 ============================================================ */
@@ -121,6 +125,8 @@ async function syncFromNeptun() {
       stateVersion = alertsData.version || Math.floor(Date.now() / 1000);
       stateUpdatedAt = alertsData.updatedAt || new Date().toISOString();
 
+      const allIncomingAlerts = [];
+
       nationalRaions.clear();
       nationalOblasts.clear();
 
@@ -128,6 +134,13 @@ async function syncFromNeptun() {
         for (const r of alertsData.raions) {
           const key = r.key || `${r.name}::${r.oblast}`;
           nationalRaions.set(key, r);
+          allIncomingAlerts.push({
+            key,
+            name: r.name,
+            oblast: r.oblast,
+            since: r.since || r.started_at,
+            level: r.level || 'red'
+          });
         }
       }
 
@@ -135,8 +148,18 @@ async function syncFromNeptun() {
         for (const o of alertsData.oblasts) {
           const key = o.key || o.name;
           nationalOblasts.set(key, o);
+          allIncomingAlerts.push({
+            key,
+            name: o.name,
+            oblast: o.oblast || o.name,
+            since: o.since || o.started_at,
+            level: o.level || 'red'
+          });
         }
       }
+
+      // Відправка фонових Push-сповіщень при переході станів (NORMAL -> ALERT / ALERT -> CLEAR)
+      pushService.handleAlertStateTransitions(allIncomingAlerts);
     }
 
     if (threatsData) {
@@ -767,6 +790,16 @@ app.post('/api/v1/alerts', (req, res) => {
 
     nationalRaions.set(key, raionObj);
     broadcastSSE('raion_update', raionObj);
+    pushService.broadcastEvent({
+      type: 'OFFICIAL_ALERT',
+      territory: raionObj.oblast || raionObj.name,
+      district: raionObj.name,
+      title: '🚨 ПОВІТРЯНА ТРИВОГА',
+      body: `${raionObj.name} (${raionObj.oblast}) — оголошено повітряну тривогу! Прямуйте в укриття.`,
+      isCritical: true,
+      tag: `alert-${key}`,
+      fingerprint: `ALERT:${key}:${raionObj.since}`
+    });
     return res.status(201).json({ success: true, type: 'raion', data: raionObj });
   }
 
@@ -787,6 +820,15 @@ app.post('/api/v1/alerts', (req, res) => {
 
   nationalOblasts.set(key, oblastObj);
   broadcastSSE('oblast_update', oblastObj);
+  pushService.broadcastEvent({
+    type: 'OFFICIAL_ALERT',
+    territory: oblastObj.oblast || oblastObj.name,
+    title: '🚨 ПОВІТРЯНА ТРИВОГА',
+    body: `${oblastObj.name} — оголошено повітряну тривогу! Прямуйте в укриття.`,
+    isCritical: true,
+    tag: `alert-${key}`,
+    fingerprint: `ALERT:${key}:${oblastObj.since}`
+  });
   return res.status(201).json({ success: true, type: 'oblast', data: oblastObj });
 });
 
@@ -802,6 +844,16 @@ app.delete('/api/v1/alerts/:key', (req, res) => {
     const item = nationalRaions.get(decodedKey);
     nationalRaions.delete(decodedKey);
     broadcastSSE('raion_clear', item);
+    pushService.broadcastEvent({
+      type: 'CLEAR',
+      territory: item.oblast || item.name,
+      district: item.name,
+      title: '✅ ВІДБІЙ ТРИВОГИ',
+      body: `${item.name} (${item.oblast}) — відбій повітряної тривоги.`,
+      isCritical: false,
+      tag: `clear-${decodedKey}`,
+      fingerprint: `CLEAR:${decodedKey}:${Date.now()}`
+    });
     return res.json({ success: true, key: decodedKey });
   }
 
@@ -809,6 +861,15 @@ app.delete('/api/v1/alerts/:key', (req, res) => {
     const item = nationalOblasts.get(decodedKey);
     nationalOblasts.delete(decodedKey);
     broadcastSSE('oblast_clear', item);
+    pushService.broadcastEvent({
+      type: 'CLEAR',
+      territory: item.oblast || item.name,
+      title: '✅ ВІДБІЙ ТРИВОГИ',
+      body: `${item.name} — відбій повітряної тривоги.`,
+      isCritical: false,
+      tag: `clear-${decodedKey}`,
+      fingerprint: `CLEAR:${decodedKey}:${Date.now()}`
+    });
     return res.json({ success: true, key: decodedKey });
   }
 

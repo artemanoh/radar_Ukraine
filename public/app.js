@@ -5101,6 +5101,12 @@ const UIController = {
     const btnClose               = document.getElementById('btn-close-settings');
     const btnSave                = document.getElementById('btn-save-settings');
     const notifCheck             = document.getElementById('setting-notifications-enabled');
+    const criticalCheck          = document.getElementById('setting-critical-alerts-enabled');
+    const emergencyCheck         = document.getElementById('setting-emergency-alerts-enabled');
+    const pushServerUrlInput     = document.getElementById('setting-push-server-url');
+    const pushStatusBadge        = document.getElementById('push-status-badge');
+    const btnTestPush            = document.getElementById('btn-test-push-notification');
+    const iosPwaNotice           = document.getElementById('ios-pwa-notice');
     const officialCheck          = document.getElementById('setting-official-alerts-enabled');
     const threatsCheck           = document.getElementById('setting-threats-alerts-enabled');
     const launchesCheck          = document.getElementById('setting-launches-alerts-enabled');
@@ -5248,9 +5254,23 @@ const UIController = {
       updateAiSuboptionsState(e.target.checked);
     });
 
+    btnTestPush?.addEventListener('click', async () => {
+      btnTestPush.disabled = true;
+      btnTestPush.classList.add('opacity-50');
+      try {
+        await NotificationManager.sendTestPush();
+      } finally {
+        btnTestPush.disabled = false;
+        btnTestPush.classList.remove('opacity-50');
+      }
+    });
+
     const openModal = () => {
       const s = StorageManager.getSettings();
       if (notifCheck)             notifCheck.checked             = s.notificationsEnabled;
+      if (criticalCheck)          criticalCheck.checked          = s.criticalAlertsEnabled !== false;
+      if (emergencyCheck)         emergencyCheck.checked         = s.emergencyThreatsEnabled !== false;
+      if (pushServerUrlInput)     pushServerUrlInput.value       = s.pushServerUrl || '';
       if (officialCheck)          officialCheck.checked          = s.officialAlertsEnabled !== false;
       if (threatsCheck)           threatsCheck.checked           = s.threatsAlertsEnabled !== false;
       if (launchesCheck)          launchesCheck.checked          = s.launchesAlertsEnabled !== false;
@@ -5268,6 +5288,26 @@ const UIController = {
       if (layerThreats)    layerThreats.checked    = s.layerThreats;
       if (animCheck)       animCheck.checked       = s.enableAnimations;
       if (mapApiKeyInput)  mapApiKeyInput.value    = s.cartoApiKey || MapService.apiKey || '';
+
+      // iOS PWA перевірка
+      const iosStatus = NotificationManager.checkIosStatus ? NotificationManager.checkIosStatus() : { isIos: false, isStandalone: false };
+      if (iosPwaNotice) {
+        iosPwaNotice.classList.toggle('hidden', !(iosStatus.isIos && !iosStatus.isStandalone));
+      }
+
+      // Оновлення бейджа статусу Push
+      if (pushStatusBadge) {
+        if (NotificationManager.pushSubscription) {
+          pushStatusBadge.textContent = '● Web Push активний';
+          pushStatusBadge.className = 'text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30';
+        } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          pushStatusBadge.textContent = '○ Очікує підписки';
+          pushStatusBadge.className = 'text-[10px] font-mono text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30';
+        } else {
+          pushStatusBadge.textContent = '✕ Не підключено';
+          pushStatusBadge.className = 'text-[10px] font-mono text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/10';
+        }
+      }
 
       // Персональна небезпека
       const geoOn = s.geoEnabled === true;
@@ -5396,11 +5436,14 @@ const UIController = {
 
       const updated = {
         notificationsEnabled:     notifCheck?.checked || false,
+        criticalAlertsEnabled:    criticalCheck?.checked !== false,
+        emergencyThreatsEnabled:  emergencyCheck?.checked !== false,
         officialAlertsEnabled:    officialCheck?.checked !== false,
         threatsAlertsEnabled:     threatsCheck?.checked !== false,
         launchesAlertsEnabled:    launchesCheck?.checked !== false,
         infoMessagesEnabled:      infoCheck?.checked !== false,
         urgentAlertsEnabled:      urgentCheck?.checked !== false,
+        pushServerUrl:            (pushServerUrlInput?.value || '').trim(),
         geoEnabled:               isGeoEnabled,
         personalDangerRadiusKm:   personalRad,
         personalDangerNotif:      personalNotifCheck?.checked !== false,
@@ -5435,6 +5478,18 @@ const UIController = {
         PersonalDangerService.startWatching(true);
       } else {
         PersonalDangerService.disable();
+      }
+
+      if (updated.notificationsEnabled) {
+        NotificationManager.subscribeToPush().then(() => {
+          NotificationManager.syncSubscriptionSettings();
+        }).catch(err => {
+          console.warn('[PUSH] Subscription error on save:', err);
+        });
+      } else {
+        NotificationManager.unsubscribeFromPush().catch(err => {
+          console.warn('[PUSH] Unsubscribe error on save:', err);
+        });
       }
 
       modal?.classList.add('hidden');
@@ -5682,38 +5737,295 @@ const SoundService = {
 
 const NotificationManager = {
   swRegistration: null,
+  pushSubscription: null,
+  isPushSubscribed: false,
 
   async init() {
     if ('serviceWorker' in navigator) {
       try {
-        this.swRegistration = await navigator.serviceWorker.register('/sw.js');
-        console.log('[PWA] Service Worker успішно зареєстровано');
+        const swPath = (typeof BASE_PATH !== 'undefined' ? BASE_PATH : './') + 'sw.js';
+        const swScope = typeof BASE_PATH !== 'undefined' ? BASE_PATH : './';
+        this.swRegistration = await navigator.serviceWorker.register(swPath, { scope: swScope });
+        console.log('[PWA] Service Worker успішно зареєстровано зі scope:', swScope);
+
+        // Слухач повідомлень від Service Worker
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          const msg = event.data;
+          if (!msg) return;
+
+          if (msg.type === 'RADAR_PUSH_RECEIVED') {
+            this.handleIncomingPush(msg.payload, msg.isCritical);
+          } else if (msg.type === 'RADAR_NOTIFICATION_CLICKED') {
+            this.handleNotificationClicked(msg.data);
+          }
+        });
+
+        // Перевіряємо статус існуючої Push-підписки
+        await this.checkSubscription();
       } catch (err) {
-        console.warn('[PWA] Не вдалося зареєструвати Service Worker:', err);
+        console.warn('[PWA] Помилка реєстрації Service Worker:', err);
+      }
+    }
+  },
+
+  getPushServerUrl() {
+    const s = StorageManager.getSettings();
+    if (s.pushServerUrl && s.pushServerUrl.trim()) {
+      return s.pushServerUrl.trim().replace(/\/+$/, '');
+    }
+    if (typeof window.RADAR_CONFIG !== 'undefined' && window.RADAR_CONFIG.PUSH_API_URL) {
+      return window.RADAR_CONFIG.PUSH_API_URL.replace(/\/+$/, '');
+    }
+    if (typeof window.RADAR_PUSH_URL === 'string' && window.RADAR_PUSH_URL.trim()) {
+      return window.RADAR_PUSH_URL.trim().replace(/\/+$/, '');
+    }
+    // За замовчуванням: поточний origin (для Node.js бекенду або self-hosted)
+    return window.location.origin;
+  },
+
+  urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  },
+
+  checkIosStatus() {
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    const hasPushManager = 'PushManager' in window;
+    return {
+      isIos,
+      isStandalone,
+      supported: hasPushManager && (!isIos || isStandalone)
+    };
+  },
+
+  async checkSubscription() {
+    if (!this.swRegistration || !('PushManager' in window)) return false;
+    try {
+      this.pushSubscription = await this.swRegistration.pushManager.getSubscription();
+      this.isPushSubscribed = Boolean(this.pushSubscription);
+      this.updatePushBadge(this.isPushSubscribed);
+      return this.isPushSubscribed;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  updatePushBadge(isSubscribed) {
+    const badge = document.getElementById('push-status-badge');
+    if (badge) {
+      if (isSubscribed) {
+        badge.textContent = 'Push активний';
+        badge.className = 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold';
+      } else {
+        badge.textContent = 'Не підключено';
+        badge.className = 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30';
       }
     }
   },
 
   async requestPermission() {
     if (!('Notification' in window)) return false;
-    if (Notification.permission === 'granted') return true;
-    return (await Notification.requestPermission()) === 'granted';
+    if (Notification.permission === 'granted') {
+      await this.subscribeToPush();
+      return true;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      await this.subscribeToPush();
+      return true;
+    }
+    return false;
   },
 
-  send(title, body, tag = 'radar-alert', isUrgent = false) {
+  async subscribeToPush() {
+    if (!this.swRegistration) {
+      await this.init();
+    }
+    if (!this.swRegistration || !('PushManager' in window)) {
+      console.warn('[PUSH] PushManager не підтримується цим браузером.');
+      return null;
+    }
+
+    try {
+      const serverUrl = this.getPushServerUrl();
+      const res = await fetch(`${serverUrl}/api/v1/push/vapid-public-key`, {
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} отримання VAPID-ключа`);
+      }
+      const data = await res.json();
+      const publicKey = data.publicKey;
+      if (!publicKey) {
+        throw new Error('Отримано порожній VAPID-ключ від сервера');
+      }
+
+      const appServerKey = this.urlBase64ToUint8Array(publicKey);
+      let sub = await this.swRegistration.pushManager.getSubscription();
+      if (!sub) {
+        sub = await this.swRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: appServerKey
+        });
+      }
+
+      this.pushSubscription = sub;
+      this.isPushSubscribed = true;
+      this.updatePushBadge(true);
+
+      // Синхронізуємо підписку з бекендом
+      await this.syncSubscriptionSettings(sub);
+      console.log('[PUSH] Успішно підписано на Web Push notifications.');
+      return sub;
+    } catch (err) {
+      console.warn('[PUSH] Помилка створення Push-підписки:', err.message);
+      this.updatePushBadge(false);
+      return null;
+    }
+  },
+
+  async unsubscribeFromPush() {
+    if (!this.swRegistration || !('PushManager' in window)) return;
+    try {
+      const sub = await this.swRegistration.pushManager.getSubscription();
+      if (sub) {
+        const serverUrl = this.getPushServerUrl();
+        await fetch(`${serverUrl}/api/v1/push/unsubscribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: sub.endpoint })
+        }).catch(() => null);
+
+        await sub.unsubscribe();
+      }
+      this.pushSubscription = null;
+      this.isPushSubscribed = false;
+      this.updatePushBadge(false);
+      console.log('[PUSH] Підписку скасовано.');
+    } catch (e) {
+      console.warn('[PUSH] Помилка відписки:', e);
+    }
+  },
+
+  async syncSubscriptionSettings(existingSub = null) {
+    const sub = existingSub || this.pushSubscription;
+    if (!sub) return;
+
+    try {
+      const s = StorageManager.getSettings();
+      const territory = (s.selectedRegion || StorageManager.getSelectedTerritory?.() || 'all');
+      const district = s.selectedDistrict || 'all';
+      const showEntireRegion = s.showEntireRegionWithDistrict !== false;
+
+      const payload = {
+        subscription: sub.toJSON(),
+        territory,
+        district,
+        showEntireRegion,
+        filters: {
+          notificationsEnabled: s.notificationsEnabled !== false,
+          criticalAlertsEnabled: s.criticalAlertsEnabled !== false,
+          officialAlertsEnabled: s.officialAlertsEnabled !== false,
+          urgentThreatsEnabled: s.urgentAlertsEnabled !== false || s.emergencyThreatsEnabled !== false,
+          targetAlertsEnabled: s.threatsAlertsEnabled !== false,
+          infoMessagesEnabled: s.infoMessagesEnabled !== false,
+          aiNotificationsEnabled: s.aiNotifications === true,
+          quietHours: s.quietHours === true
+        }
+      };
+
+      const serverUrl = this.getPushServerUrl();
+      await fetch(`${serverUrl}/api/v1/push/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      console.log('[PUSH] Налаштування підписки синхронізовано з сервером.');
+    } catch (e) {
+      console.warn('[PUSH] Помилка синхронізації підписки з бекендом:', e.message);
+    }
+  },
+
+  async sendTestPush() {
+    const serverUrl = this.getPushServerUrl();
+    const endpoint = this.pushSubscription ? this.pushSubscription.endpoint : null;
+
+    try {
+      const res = await fetch(`${serverUrl}/api/v1/push/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint,
+          isUrgent: true,
+          title: '🚨 ТЕСТ КРИТИЧНОГО ОПОВІЩЕННЯ RADAR',
+          body: 'Тестове push-сповіщення: система фонового моніторингу активна навіть коли вкладку закрито.'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Помилка відправки тестового push');
+      showToast('Тестове Push-сповіщення відправлено на сервер!');
+      return true;
+    } catch (err) {
+      showToast(`Помилка тесту: ${err.message}`, true);
+      return false;
+    }
+  },
+
+  handleIncomingPush(payload, isCritical) {
+    // Якщо сайт відкритий у активній вкладці — відтворюємо відповідний звук
+    const s = StorageManager.getSettings();
+    if (s.soundEnabled && !SoundService.isQuietTime()) {
+      if (payload.type === 'OFFICIAL_ALERT') {
+        if (s.soundAlertEnabled !== false) SoundService.playAlertSiren();
+      } else if (payload.type === 'EMERGENCY_THREAT') {
+        if (s.soundTargetDangerEnabled !== false) SoundService.playUrgentSiren();
+      } else if (payload.type === 'CLEAR') {
+        if (s.soundClearEnabled !== false) SoundService.playClearSound();
+      } else {
+        SoundService.playInfoChime();
+      }
+    }
+
+    showToast(payload.title || 'Оновлення обстановки', isCritical);
+  },
+
+  handleNotificationClicked(data) {
+    if (data && data.url) {
+      if (data.url.includes('#alerts')) {
+        NavigationController?.switchTab('alerts');
+      } else if (data.url.includes('#map')) {
+        NavigationController?.switchTab('map');
+      }
+    }
+  },
+
+  send(title, body, tag = 'radar-alert', isUrgent = false, type = 'INFO') {
     if (isInitialLoad) return;
     const s = StorageManager.getSettings();
     if (!s.notificationsEnabled || SoundService.isQuietTime()) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
     try {
+      const isCritical = isUrgent || type === 'OFFICIAL_ALERT' || type === 'EMERGENCY_THREAT';
       const options = {
         body,
-        icon: isUrgent
+        icon: isCritical
           ? 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ef4444"><path d="M12 2L1 21h22L12 2zm0 3.5L20 19H4L12 5.5zM11 10v4h2v-4h-2zm0 6v2h2v-2h-2z"/></svg>'
           : 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%230284c7"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>',
         tag,
-        requireInteraction: isUrgent
+        requireInteraction: isCritical,
+        renotify: isCritical,
+        vibrate: isCritical ? [300, 100, 300, 100, 300] : [200, 100, 200]
       };
+
       if (this.swRegistration && this.swRegistration.showNotification) {
         this.swRegistration.showNotification(title, options);
       } else {
@@ -5937,11 +6249,14 @@ const StorageManager = {
 
   defaultSettings: {
     notificationsEnabled:   false,
+    criticalAlertsEnabled:  true,
+    emergencyThreatsEnabled: true,
     officialAlertsEnabled:  true,
     threatsAlertsEnabled:   true,
     launchesAlertsEnabled:  true,
     infoMessagesEnabled:    true,
     urgentAlertsEnabled:    true,
+    pushServerUrl:          '',
     geoEnabled:             false, // За замовчуванням вимкнено (Вимога п. 11.1)
     personalDangerRadiusKm: 10,
     personalDangerNotif:    true,

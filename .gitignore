@@ -6,4 +6,6 @@ npm-debug.log*
 dist/
 public/map-config.json
 radar/public/map-config.json
+.vapid.json
+data/
 .DS_Store

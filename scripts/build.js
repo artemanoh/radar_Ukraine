@@ -113,7 +113,8 @@ const requiredFiles = [
   'assets/icons/missile.svg',
   'assets/icons/app_icon.svg',
   'favicon.svg',
-  'manifest.json'
+  'manifest.json',
+  'sw.js'
 ];
 
 console.log('\n🔍 [VALIDATION] Перевірка цілісності збірки:');

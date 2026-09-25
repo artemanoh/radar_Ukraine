@@ -1,90 +1,151 @@
-// public/sw.js — Service Worker для PWA «РАДАР — Національний моніторинг повітряного простору»
-const CACHE_NAME = 'radar-cache-v2';
-const STATIC_ASSETS = [
-  './',
-  './index.html',
-  './style.css',
-  './app.js',
-  './manifest.json',
-  './assets/icons/app_icon.svg',
-  './sounds/notification.mp3',
-  './sounds/siren.mp3',
-  './sounds/clear.mp3',
-  './sounds/urgent.mp3'
-];
+/**
+ * sw.js
+ * Service Worker для системи «РАДАР — Національний моніторинг повітряного простору».
+ * 
+ * Забезпечує:
+ * 1. Background Web Push сповіщення навіть при повністю закритій вкладці / браузері у фоні.
+ * 2. Обробку критичних (Critical / Time-sensitive) та екстрених оповіщень.
+ * 3. Дедуплікацію та оновлення за унікальними тегами (tag).
+ * 4. Навігацію та фокусування застосунку при натисканні (notificationclick).
+ * 5. Підтримку GitHub Pages (динамічний scope).
+ */
 
-// Встановлення Service Worker
+const SW_VERSION = 'radar-sw-v2.1';
+
+// Встановлення та миттєва активація нового Service Worker
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch(() => {});
-    })
-  );
   self.skipWaiting();
 });
 
-// Активація та очищення старого кешу
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    self.clients.claim().then(() => {
+      console.log(`[RADAR-SW] Активовано версію ${SW_VERSION}`);
+    })
   );
-  self.clients.claim();
 });
 
-// Обробка Web Push подій (від сервера/бекенду)
+// Обробка отриманого Push-повідомлення
 self.addEventListener('push', (event) => {
-  let payload = {
-    title: 'РАДАР — Сповіщення',
-    body: 'Нова подія у повітряному просторі',
-    tag: 'radar-alert',
-    isUrgent: false
-  };
-
-  try {
-    if (event.data) {
-      payload = event.data.json();
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data = {
+        title: 'РАДАР — Оновлення',
+        body: event.data.text()
+      };
     }
-  } catch (err) {
-    if (event.data) {
-      payload.body = event.data.text();
-    }
+  } else {
+    data = {
+      title: 'РАДАР — Оповіщення',
+      body: 'Отримано оперативне оновлення повітряного простору.'
+    };
   }
 
+  const isCritical = data.isCritical === true || data.priority === 'CRITICAL' || data.priority === 'EMERGENCY';
+  const isClear = data.type === 'CLEAR';
+
+  // Базовий шлях для іконок з урахуванням scope (підтримка як localhost, так і /radar_Ukraine/)
+  const scopeUrl = new URL(self.registration.scope);
+  const basePath = scopeUrl.pathname.endsWith('/') ? scopeUrl.pathname : `${scopeUrl.pathname}/`;
+  
+  const iconUrl = new URL(`${basePath}assets/icons/app_icon.svg`, self.location.origin).href;
+  const badgeUrl = iconUrl;
+
+  const defaultTag = isClear 
+    ? `radar-clear-${Date.now()}` 
+    : (data.tag || (isCritical ? 'radar-critical-alert' : 'radar-info'));
+
+  // Налаштування для максимального рівня сповіщення на платформі
   const options = {
-    body: payload.body,
-    icon: payload.icon || './assets/icons/app_icon.svg',
-    badge: './assets/icons/app_icon.svg',
-    tag: payload.tag || 'radar-alert',
-    renotify: true,
-    requireInteraction: payload.isUrgent === true,
+    body: data.body || '',
+    icon: iconUrl,
+    badge: badgeUrl,
+    tag: defaultTag,
+    renotify: isCritical || isClear, // повторна вібрація/звук при оновленні тегу
+    requireInteraction: isCritical,   // тримати на екрані для критичних подій
+    silent: false,
+    timestamp: data.timestamp || Date.now(),
     data: {
-      url: payload.url || './',
-      time: Date.now()
-    }
+      url: data.url || `${basePath}#alerts`,
+      priority: data.priority || (isCritical ? 'CRITICAL' : 'NORMAL'),
+      type: data.type || 'INFO',
+      territory: data.territory || '',
+      eventTime: data.eventTime || Date.now()
+    },
+    // Вібраційні патерни: тактичний тривожний ритм для критичних подій
+    vibrate: isCritical
+      ? [300, 100, 300, 100, 300, 100, 400]
+      : (isClear ? [150, 100, 150] : [200, 100, 200]),
+    actions: [
+      {
+        action: 'open-radar',
+        title: 'Відкрити РАДАР'
+      },
+      {
+        action: 'dismiss',
+        title: 'Зрозуміло'
+      }
+    ]
   };
 
+  const title = data.title || (isCritical ? '🚨 КРИТИЧНЕ ОПОВІЩЕННЯ RADAR' : 'РАДАР');
+
   event.waitUntil(
-    self.registration.showNotification(payload.title, options)
+    self.registration.showNotification(title, options)
+      .then(() => {
+        // Оповіщаємо активні вкладки (якщо відкриті) про отримання push
+        return self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      })
+      .then((clientList) => {
+        for (const client of clientList) {
+          client.postMessage({
+            type: 'RADAR_PUSH_RECEIVED',
+            payload: data,
+            isCritical
+          });
+        }
+      })
   );
 });
 
-// Клік по сповіщенню
+// Обробка натискання на сповіщення
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || './';
+
+  if (event.action === 'dismiss') {
+    return;
+  }
+
+  const notificationData = event.notification.data || {};
+  const targetUrl = notificationData.url || self.registration.scope;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Якщо вкладка вже відкрита — фокусуємо її
       for (const client of clientList) {
         if ('focus' in client) {
-          return client.focus();
+          client.focus();
+          client.postMessage({
+            type: 'RADAR_NOTIFICATION_CLICKED',
+            data: notificationData
+          });
+          return;
         }
       }
+      // Якщо жодної вкладки не відкрито — відкриваємо нове вікно
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);
       }
     })
   );
+});
+
+// Слухач повідомлень від клієнта
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.action === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
